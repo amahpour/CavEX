@@ -33,6 +33,7 @@ add_executable(cavex
 				source/block/block_brown_mushroom.c
 				source/block/block_cactus.c
 				source/block/block_cake.c
+				source/block/block_candle.c
 				source/block/block_cast_block.c
 				source/block/block_chest.c
 				source/block/block_clay.c

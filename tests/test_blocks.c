@@ -61,10 +61,37 @@ TEST(blocks_all_sides) {
 	ASSERT(x == 0 && y == 0 && z == -1);
 }
 
+TEST(candle_block_registered) {
+	// The candle (issue #30) is a registration-only, light-emitting block.
+	// blocks_init() is GX/graphics-bound and is not linked into the test
+	// harness, so register the real candle struct into the stub registry the
+	// same way blocks_init() does, then exercise its accessors.
+	blocks[BLOCK_CANDLE] = &block_candle;
+
+	ASSERT_NE(blocks[BLOCK_CANDLE], NULL);
+	ASSERT(strcmp(blocks[BLOCK_CANDLE]->name, "Candle") == 0);
+	ASSERT(blocks[BLOCK_CANDLE]->luminance > 0);
+
+	// Drives the real candle code paths so the test adds covered lines.
+	struct block_data blk = {.type = BLOCK_CANDLE};
+	struct block_info info = {.block = &blk};
+	ASSERT_EQ(blocks[BLOCK_CANDLE]->getMaterial(&info), MATERIAL_GLASS);
+	(void)blocks[BLOCK_CANDLE]->getTextureIndex(&info, SIDE_TOP);
+
+	// Candle drops itself (block_drop_default), like other simple blocks.
+	struct item_data drop = {0};
+	ASSERT_EQ(blocks[BLOCK_CANDLE]->getDroppedItem(&info, &drop, NULL), 1U);
+	ASSERT_EQ(drop.id, BLOCK_CANDLE);
+	ASSERT_EQ(drop.count, 1U);
+
+	blocks[BLOCK_CANDLE] = NULL;
+}
+
 const test_entry_t g_tests_blocks[] = {
 	{"blocks_side_helpers", test_blocks_side_helpers},
 	{"block_drop_default_item", test_block_drop_default_item},
 	{"blocks_all_sides", test_blocks_all_sides},
+	{"candle_block_registered", test_candle_block_registered},
 };
 
 const size_t g_tests_blocks_count

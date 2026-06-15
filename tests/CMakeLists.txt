@@ -5,6 +5,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/stack.c
 	${CMAKE_SOURCE_DIR}/source/block/aabb.c
 	${CMAKE_SOURCE_DIR}/source/block/blocks_util.c
+	${CMAKE_SOURCE_DIR}/source/block/block_candle.c
 	${CMAKE_SOURCE_DIR}/source/block/face_occlusion.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/buffer.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/nbt_parsing.c
@@ -28,6 +29,7 @@ add_library(cavex_testlib STATIC
 	stubs/game_state_stub.c
 	stubs/blocks_stub.c
 	stubs/items_stub.c
+	stubs/render_stub.c
 )
 
 target_include_directories(cavex_testlib PRIVATE
