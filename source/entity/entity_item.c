@@ -17,6 +17,7 @@
 	along with CavEX.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "../block/blocks.h"
 #include "../block/blocks_data.h"
 #include "../game/game_state.h"
 #include "../network/client_interface.h"

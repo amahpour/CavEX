@@ -279,28 +279,6 @@ void entity_try_move(struct entity* e, vec3 pos, vec3 vel, struct AABB* bbox,
 	pos[coord] = pos[coord] * (1.0F - threshold) + tmp[coord] * threshold;
 }
 
-uint32_t entity_gen_id(dict_entity_t dict) {
-	assert(dict);
-
-	dict_entity_it_t it;
-	dict_entity_it(it, dict);
-
-	// id = 0 is reserved for local player
-
-	uint32_t id = 0;
-
-	while(!dict_entity_end_p(it)) {
-		uint32_t key = dict_entity_ref(it)->key;
-
-		if(key > id)
-			id = key;
-
-		dict_entity_next(it);
-	}
-
-	return id + 1;
-}
-
 void entities_client_tick(dict_entity_t dict) {
 	dict_entity_it_t it;
 	dict_entity_it(it, dict);

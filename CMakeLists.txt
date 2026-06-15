@@ -74,6 +74,7 @@ add_executable(cavex
 				source/block/block_sandstone.c
 				source/block/block_sapling.c
 				source/block/blocks.c
+				source/block/blocks_util.c
 				source/block/block_slab.c
 				source/block/block_snow.c
 				source/block/block_spawner.c
@@ -90,6 +91,7 @@ add_executable(cavex
 				source/block/face_occlusion.c
 
 				source/entity/entity.c
+				source/entity/entity_id.c
 				source/entity/entity_local_player.c
 				source/entity/entity_item.c
 
@@ -144,6 +146,7 @@ add_executable(cavex
 
 				source/chunk_mesher.c
 				source/chunk.c
+				source/chunk_storage.c
 				source/daytime.c
 				source/lighting.c
 				source/main.c
