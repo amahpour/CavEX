@@ -33,6 +33,20 @@ static bool input_pointer_enabled;
 static double input_old_pointer_x, input_old_pointer_y;
 static bool input_key_held[1024];
 
+// Virtual key codes for the mouse wheel (config_pc.json binds scroll to these).
+// GLFW scroll events are momentary, so the callback accumulates notches here
+// and input_native_key_status reports each as a one-shot "pressed" edge.
+#define KEY_WHEEL_UP 2000
+#define KEY_WHEEL_DOWN 2001
+static int input_wheel_up, input_wheel_down;
+
+void input_native_scroll(double yoffset) {
+	if(yoffset > 0)
+		input_wheel_up++;
+	else if(yoffset < 0)
+		input_wheel_down++;
+}
+
 void input_init() {
 	for(int k = 0; k < 1024; k++)
 		input_key_held[k] = false;
@@ -40,16 +54,28 @@ void input_init() {
 	input_pointer_enabled = false;
 	input_old_pointer_x = 0;
 	input_old_pointer_y = 0;
+	input_wheel_up = input_wheel_down = 0;
 }
 
 void input_poll() { }
 
 void input_native_key_status(int key, bool* pressed, bool* released,
 							 bool* held) {
+	if(key == KEY_WHEEL_UP || key == KEY_WHEEL_DOWN) {
+		int* w = (key == KEY_WHEEL_UP) ? &input_wheel_up : &input_wheel_down;
+		*pressed = *w > 0;	// consumed once per accumulated notch
+		*released = false;
+		*held = false;
+		if(*w > 0)
+			(*w)--;
+		return;
+	}
+
 	if(key >= 1024) {
 		*pressed = false;
 		*released = false;
 		*held = false;
+		return;
 	}
 
 	int state = key < 1000 ? glfwGetKey(window, key) :
@@ -351,6 +377,29 @@ bool input_native_key_any(int* key) {
 	return false;
 }
 
+// temporary diagnostics: raw WPAD expansion state for the on-screen debug line
+#include <stdio.h>
+void input_debug_wpad(char* dst, size_t len) {
+	expansion_t e;
+	WPAD_Expansion(WPAD_CHAN_0, &e);
+	u32 held = WPAD_ButtonsHeld(WPAD_CHAN_0);
+	int t = e.type;
+	int mag = -1, ang = -1, px = -1, py = -1;
+	if(t == WPAD_EXP_NUNCHUK) {
+		mag = (int)(e.nunchuk.js.mag * 100.0F);
+		ang = (int)e.nunchuk.js.ang;
+		px = e.nunchuk.js.pos.x;
+		py = e.nunchuk.js.pos.y;
+	} else if(t == WPAD_EXP_CLASSIC) {
+		mag = (int)(e.classic.rjs.mag * 100.0F);
+		ang = (int)e.classic.rjs.ang;
+		px = e.classic.rjs.pos.x;
+		py = e.classic.rjs.pos.y;
+	}
+	snprintf(dst, len, "ext=%d mag=%d ang=%d pos=%d,%d held=%08x", t, mag, ang,
+			 px, py, (unsigned)held);
+}
+
 void input_pointer_enable(bool enable) { }
 
 bool input_pointer(float* x, float* y, float* angle) {
@@ -371,8 +420,30 @@ void input_native_joystick(float dt, float* dx, float* dy) {
 		*dx = joystick_input[2].dx * joystick_input[2].magnitude * dt;
 		*dy = joystick_input[2].dy * joystick_input[2].magnitude * dt;
 	} else {
+		// Fallback when no extension stick is available (e.g. Dolphin's
+		// emulated Wiimote, whose Nunchuk/Classic never complete the WPAD
+		// handshake): steer the camera with the IR pointer instead. Pushing
+		// the pointer outside the middle of the screen pans the view toward
+		// it, scaled by how far it is from center; the inner zone is neutral
+		// so the view doesn't drift while aiming.
+		struct ir_t ir;
+		WPAD_IR(WPAD_CHAN_0, &ir);
 		*dx = 0.0F;
 		*dy = 0.0F;
+		// Hold the view still while mining: CavEX resets dig progress whenever
+		// the targeted cell changes, so even slight edge-pan drift would keep
+		// restarting the dig and blocks would never break.
+		if(ir.valid && !input_held(IB_ACTION1)) {
+			float nx = ir.x / (ir.vres[0] ? ir.vres[0] : 640) * 2.0F - 1.0F;
+			float ny = ir.y / (ir.vres[1] ? ir.vres[1] : 480) * 2.0F - 1.0F;
+			float dead = 0.15F;
+			float speed = 2.0F;
+			float ax = fabsf(nx), ay = fabsf(ny);
+			if(ax > dead)
+				*dx = (nx > 0 ? 1 : -1) * (ax - dead) / (1.0F - dead) * speed * dt;
+			if(ay > dead)
+				*dy = -(ny > 0 ? 1 : -1) * (ay - dead) / (1.0F - dead) * speed * dt;
+		}
 	}
 }
 

@@ -26,7 +26,7 @@ BUILD		:=	build
 SOURCES		:=	source source/block source/entity source/graphics source/network source/game source/game/gui source/platform source/item source/item/items source/cNBT source/lodepng source/parson
 DATA		:=
 TEXTURES	:=	textures
-INCLUDES	:=
+INCLUDES	:=	include
 
 #---------------------------------------------------------------------------------
 # options for code generation

@@ -47,6 +47,7 @@ void displaylist_init(struct displaylist* l, size_t vertices,
 	 * by realloc */
 	l->index = DISPLAYLIST_CLL + 3;
 	l->finished = false;
+	l->oom = false;
 }
 
 void displaylist_destroy(struct displaylist* l) {
@@ -62,7 +63,14 @@ void displaylist_reset(struct displaylist* l) {
 }
 
 void displaylist_finalize(struct displaylist* l, uint16_t vtxcnt) {
-	assert(l && !l->finished && l->data);
+	assert(l && !l->finished);
+
+	if(l->oom || !l->data) {
+		// allocation failed during build: stay unfinished so
+		// displaylist_render() skips this list entirely (one missing mesh
+		// side beats GX executing a garbage/NULL buffer)
+		return;
+	}
 
 	MEM_U8(l->data, DISPLAYLIST_CLL)
 		= GX_QUADS | ((l->direct_color ? GX_VTXFMT3 : GX_VTXFMT0) & 7);
@@ -78,16 +86,28 @@ void displaylist_finalize(struct displaylist* l, uint16_t vtxcnt) {
 void displaylist_pos(struct displaylist* l, int16_t x, int16_t y, int16_t z) {
 	assert(l && !l->finished);
 
+	if(l->oom)
+		return;
+
 	if(!l->data) {
 		l->data = malloc(l->length + DISPLAYLIST_CLL);
-		assert(l->data);
+		if(!l->data) {
+			l->oom = true;
+			return;
+		}
 	}
 
 	if(l->index + VERTEX_SIZE(l) > l->length) {
-		l->length = (l->length * 5 / 4 + 9 + DISPLAYLIST_CLL - 1)
+		size_t new_length = (l->length * 5 / 4 + 9 + DISPLAYLIST_CLL - 1)
 			/ DISPLAYLIST_CLL * DISPLAYLIST_CLL;
-		l->data = realloc(l->data, l->length + DISPLAYLIST_CLL);
-		assert(l->data);
+		void* new_data = realloc(l->data, new_length + DISPLAYLIST_CLL);
+		if(!new_data) {
+			// keep the old buffer (realloc didn't free it), stop emitting
+			l->oom = true;
+			return;
+		}
+		l->data = new_data;
+		l->length = new_length;
 	}
 
 	MEM_U16(l->data, l->index) = x;
@@ -99,13 +119,17 @@ void displaylist_pos(struct displaylist* l, int16_t x, int16_t y, int16_t z) {
 }
 
 void displaylist_color(struct displaylist* l, uint8_t index) {
-	assert(l && !l->finished && l->data && !l->direct_color);
+	assert(l && !l->finished && !l->direct_color);
+	if(l->oom || !l->data)
+		return;
 	MEM_U8(l->data, l->index++) = index;
 }
 
 void displaylist_color_rgba(struct displaylist* l, uint8_t r, uint8_t g,
 							uint8_t b, uint8_t a) {
-	assert(l && !l->finished && l->data && l->direct_color);
+	assert(l && !l->finished && l->direct_color);
+	if(l->oom || !l->data)
+		return;
 	MEM_U8(l->data, l->index++) = r;
 	MEM_U8(l->data, l->index++) = g;
 	MEM_U8(l->data, l->index++) = b;
@@ -113,7 +137,9 @@ void displaylist_color_rgba(struct displaylist* l, uint8_t r, uint8_t g,
 }
 
 void displaylist_texcoord(struct displaylist* l, uint8_t s, uint8_t t) {
-	assert(l && !l->finished && l->data);
+	assert(l && !l->finished);
+	if(l->oom || !l->data)
+		return;
 	MEM_U8(l->data, l->index++) = s;
 	MEM_U8(l->data, l->index++) = t;
 }

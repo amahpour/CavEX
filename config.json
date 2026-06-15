@@ -10,8 +10,8 @@
 		"player_right": [3, 203, 913],
 		"player_jump": [5, 210],
 		"player_sneak": [211],
-		"item_action_left": [100, 204],
-		"item_action_right": [101, 205],
+		"item_action_left": [100, 204, 4],
+		"item_action_right": [101, 205, 7],
 		"scroll_left": [9, 208, 213],
 		"scroll_right": [8, 209, 212],
 		"inventory": [6, 206],
@@ -22,6 +22,6 @@
 		"gui_right": [3, 203, 903, 913, 923],
 		"gui_click": [4, 204],
 		"gui_click_alt": [5, 205],
-		"screenshot": [7],
+		"screenshot": [],
 	}
 }

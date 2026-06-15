@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 
 project(cavex C)
 
-add_compile_options(-O3 -march=native -g)
+add_compile_options(-O2 -g)
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
@@ -144,6 +144,7 @@ add_executable(cavex
 				source/parson/parson.c
 			)
 
+target_include_directories(cavex PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_definitions(cavex PRIVATE PLATFORM_PC CGLM_ALL_UNALIGNED)
 
 set_target_properties(

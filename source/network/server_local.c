@@ -115,10 +115,47 @@ void server_local_send_inv_changes(set_inv_slot_t changes,
 	}
 }
 
+// TRAP: ring buffer of recently processed server RPCs (origin-snap hunt).
+// Written by the server thread, read by the main thread only when dumping a
+// trap report — racy by design, fine for diagnostics.
+struct trap_srpc_entry {
+	int type;
+	float a, b, c;
+	unsigned seq;
+};
+struct trap_srpc_entry trap_srpc_ring[32];
+unsigned trap_srpc_seq = 0;
+
 static void server_local_process(struct server_rpc* call, void* user) {
 	assert(call && user);
 
 	struct server_local* s = user;
+
+	{
+		struct trap_srpc_entry* te = trap_srpc_ring + (trap_srpc_seq % 32);
+		te->seq = trap_srpc_seq++;
+		te->type = call->type;
+		te->a = te->b = te->c = 0;
+		switch(call->type) {
+			case SRPC_PLAYER_POS:
+				te->a = call->payload.player_pos.x;
+				te->b = call->payload.player_pos.y;
+				te->c = call->payload.player_pos.z;
+				break;
+			case SRPC_BLOCK_DIG:
+				te->a = call->payload.block_dig.x;
+				te->b = call->payload.block_dig.y;
+				te->c = call->payload.block_dig.z;
+				break;
+			case SRPC_BLOCK_PLACE:
+				te->a = call->payload.block_place.x;
+				te->b = call->payload.block_place.y;
+				te->c = call->payload.block_place.z;
+				break;
+			case SRPC_HOTBAR_SLOT: te->a = call->payload.hotbar_slot.slot; break;
+			default: break;
+		}
+	}
 
 	switch(call->type) {
 		case SRPC_PLAYER_POS:

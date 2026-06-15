@@ -30,6 +30,10 @@ struct displaylist {
 	size_t length;
 	size_t index;
 	bool finished;
+	// set when a buffer (re)allocation failed mid-build; the list silently
+	// drops further vertices and refuses to finalize instead of writing
+	// through a NULL pointer (asserts are compiled out with -DNDEBUG)
+	bool oom;
 #ifdef PLATFORM_PC
 	int vbo;
 #endif
