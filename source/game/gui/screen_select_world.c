@@ -30,6 +30,8 @@
 #include <assert.h>
 #include <dirent.h>
 #include <m-lib/m-string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -140,10 +142,20 @@ static void screen_sworld_update(struct screen* s, float dt) {
 		scroll_offset = height_visible - side_padding
 			- (int)(gui_selection + 1) * entry_height;
 
-	if(stack_size(worlds) > 0 && input_pressed(IB_GUI_CLICK)) {
+	// CAVEX_AUTOPLAY=1: enter the first world automatically (autonomous
+	// debugging without injected input)
+	static int autoplay_ticks = 0;
+	bool autoplay = getenv("CAVEX_AUTOPLAY") && ++autoplay_ticks > 100;
+
+	if(stack_size(worlds) > 0 && (input_pressed(IB_GUI_CLICK) || autoplay)) {
 		struct world_option opt;
 		stack_at(worlds, &opt, gui_selection);
 
+#ifndef NDEBUG
+		if(getenv("CAVEX_AUTOPLAY"))
+			printf("[AUTOPLAY] loading world (worlds=%zu)\n",
+				   stack_size(worlds));
+#endif
 		struct server_rpc rpc;
 		rpc.type = SRPC_LOAD_WORLD;
 		string_init_set(rpc.payload.load_world.name, opt.path);

@@ -17,6 +17,9 @@
 	along with CavEX.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "client_interface.h"
 #include "../game/game_state.h"
 #include "../particle.h"
@@ -77,8 +80,65 @@ void clin_chunk(w_coord_t x, w_coord_t y, w_coord_t z, w_coord_t sx,
 	free(lighting_torch);
 }
 
+// TRAP: ring buffer of recently processed client RPCs (origin-snap hunt)
+struct trap_crpc_entry {
+	int type;
+	float a, b, c;
+	unsigned seq;
+};
+struct trap_crpc_entry trap_crpc_ring[32];
+unsigned trap_crpc_seq = 0;
+
+static void trap_crpc_record(struct client_rpc* call) {
+	struct trap_crpc_entry* e = trap_crpc_ring + (trap_crpc_seq % 32);
+	e->seq = trap_crpc_seq++;
+	e->type = call->type;
+	e->a = e->b = e->c = 0;
+	switch(call->type) {
+		case CRPC_PLAYER_POS:
+			e->a = call->payload.player_pos.position[0];
+			e->b = call->payload.player_pos.position[1];
+			e->c = call->payload.player_pos.position[2];
+			break;
+		case CRPC_SET_BLOCK:
+			e->a = call->payload.set_block.x;
+			e->b = call->payload.set_block.y;
+			e->c = call->payload.set_block.z;
+			break;
+		case CRPC_WORLD_RESET:
+			e->a = call->payload.world_reset.local_entity;
+			break;
+		case CRPC_CHUNK:
+			e->a = call->payload.chunk.x;
+			e->c = call->payload.chunk.z;
+			break;
+		case CRPC_UNLOAD_CHUNK:
+			e->a = call->payload.unload_chunk.x;
+			e->c = call->payload.unload_chunk.z;
+			break;
+		case CRPC_PICKUP_ITEM: e->a = call->payload.pickup_item.entity_id; break;
+		case CRPC_ENTITY_DESTROY: e->a = call->payload.entity_destroy.entity_id; break;
+		case CRPC_SPAWN_ITEM:
+			e->a = call->payload.spawn_item.pos[0];
+			e->b = call->payload.spawn_item.pos[1];
+			e->c = call->payload.spawn_item.pos[2];
+			break;
+		case CRPC_ENTITY_MOVE: e->a = call->payload.entity_move.entity_id; break;
+		default: break;
+	}
+}
+
 void clin_process(struct client_rpc* call) {
 	assert(call);
+
+	trap_crpc_record(call);
+
+	// Spawning entities (e.g. dropped items) rehashes the inline entity dict
+	// and invalidates the cached gstate.local_player pointer; re-resolve it
+	// from the stable id before any handler in this batch dereferences it.
+	if(gstate.local_player)
+		gstate.local_player
+			= dict_entity_get(gstate.entities, gstate.local_player_id);
 
 	switch(call->type) {
 		case CRPC_CHUNK:
@@ -94,6 +154,11 @@ void clin_process(struct client_rpc* call) {
 								 call->payload.unload_chunk.z);
 			break;
 		case CRPC_PLAYER_POS:
+			if(getenv("CAVEX_TRACE"))
+				printf("[CRPC_PLAYER_POS] -> (%.1f,%.1f,%.1f)\n",
+					   call->payload.player_pos.position[0],
+					   call->payload.player_pos.position[1],
+					   call->payload.player_pos.position[2]);
 			gstate.camera.rx = glm_rad(-call->payload.player_pos.rotation[0]);
 			gstate.camera.ry = glm_rad(glm_clamp(
 				call->payload.player_pos.rotation[1] + 90.0F, 0.0F, 180.0F));
@@ -106,6 +171,9 @@ void clin_process(struct client_rpc* call) {
 			gstate.world_loaded = true;
 			break;
 		case CRPC_WORLD_RESET:
+			if(getenv("CAVEX_TRACE"))
+				printf("[CRPC_WORLD_RESET] local_entity=%u\n",
+					   call->payload.world_reset.local_entity);
 			world_unload_all(&gstate.world);
 
 			for(size_t k = 0; k < 256; k++) {
@@ -129,6 +197,7 @@ void clin_process(struct client_rpc* call) {
 
 			gstate.local_player = dict_entity_safe_get(
 				gstate.entities, call->payload.world_reset.local_entity);
+			gstate.local_player_id = call->payload.world_reset.local_entity;
 			entity_local_player(call->payload.world_reset.local_entity,
 								gstate.local_player, &gstate.world);
 

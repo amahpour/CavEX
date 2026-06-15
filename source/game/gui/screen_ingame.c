@@ -338,6 +338,44 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 			VERSION_MINOR, VERSION_PATCH);
 	gutil_text(4, 4 + 17 * 0, str, 16, true);
 
+#ifdef PLATFORM_WII
+	{
+		// temporary diagnostics: show raw WPAD expansion data on screen
+		extern void input_debug_wpad(char* dst, size_t len);
+		input_debug_wpad(str, sizeof(str));
+		gutil_text(4, 4 + 17 * 1, str, 16, true);
+
+		// temporary diagnostics: mesher throughput + lighting queue depth
+		extern volatile int cm_dbg_sent, cm_dbg_recv;
+		extern volatile int dbg_cs_count, dbg_dirty_seen;
+		struct mallinfo mi = mallinfo();
+		sprintf(str, "mesh sent=%i recv=%i lq=%i dirty=%i memfree=%iK",
+				cm_dbg_sent, cm_dbg_recv,
+				(int)stack_size(&gstate.world.lighting_updates),
+				dbg_dirty_seen, (int)(mi.fordblks / 1024));
+		gutil_text(4, 4 + 17 * 2, str, 16, true);
+
+		// temporary diagnostics: dig state machine internals
+		struct block_data dblk
+			= world_get_block(&gstate.world, gstate.digging.x,
+							  gstate.digging.y, gstate.digging.z);
+		struct item_data dit;
+		inventory_get_hotbar_item(
+			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), &dit);
+		int ddelay = blocks[dblk.type] ?
+			tool_dig_delay_ms(blocks[dblk.type], item_get(&dit)) :
+			0;
+		sprintf(str, "dig a=%i e=%i d=%i cd=%i hit=%i A=%i",
+				gstate.digging.active,
+				gstate.digging.active ?
+					(int)time_diff_ms(gstate.digging.start, time_get()) :
+					-1,
+				ddelay, (int)time_diff_ms(gstate.digging.cooldown, time_get()),
+				gstate.camera_hit.hit, input_held(IB_ACTION1));
+		gutil_text(4, 4 + 17 * 3, str, 16, true);
+	}
+#endif
+
 #ifndef NDEBUG
 	sprintf(str, "%0.1f fps, wait: gpu %0.1fms, vsync %0.1fms",
 			gstate.stats.fps, gstate.stats.dt_gpu * 1000.0F,
