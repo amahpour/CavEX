@@ -1,5 +1,8 @@
 # CavEX
 
+[![Unit tests](https://github.com/amahpour/CavEX/actions/workflows/tests.yml/badge.svg)](https://github.com/amahpour/CavEX/actions/workflows/tests.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/amahpour/CavEX/master/badges/coverage.json)](https://github.com/amahpour/CavEX/actions/workflows/tests.yml)
+
 *Cave Explorer* is a Wii homebrew game with the goal to recreate most of the core survival aspects up until Beta 1.7.3. Any features beyond *will not* be added.
 
 ---
@@ -34,15 +37,17 @@
 
 ## Build instructions
 
-You need to download these libraries yourself and place their source files to the following directories. They are required for any platform.
+Unlike upstream (which ships these directories empty), this fork **vendors all
+required third-party libraries** in the repository — you do not need to download
+anything by hand. They live at the paths below, with thanks to their authors:
 
-| library | files | destination |
-| --- | --- | --- |
-| [LodePNG](https://github.com/lvandeve/lodepng) | `lodepng.h` and `lodepng.c` | `source/lodepng/` |
-| [cglm](https://github.com/recp/cglm) | `include/cglm/` | `source/cglm/` |
-| [cNBT](https://github.com/chmod222/cNBT) | `buffer.c`, `buffer.h`, `list.h`, `nbt_loading.c`, `nbt_parsing.c`, `nbt_treeops.c`, `nbt_util.c` and `nbt.h` | `source/cNBT/` |
-| [parson](https://github.com/kgabis/parson) | `parson.h` and `parson.c` | `source/parson/` |
-| [M*LIB](https://github.com/P-p-H-d/mlib) | any root `*.h` | compiler include path |
+| library | location |
+| --- | --- |
+| [LodePNG](https://github.com/lvandeve/lodepng) | `source/lodepng/` |
+| [cglm](https://github.com/recp/cglm) | `source/cglm/` |
+| [cNBT](https://github.com/chmod222/cNBT) | `source/cNBT/` |
+| [parson](https://github.com/kgabis/parson) | `source/parson/` |
+| [M*LIB](https://github.com/P-p-H-d/mlib) | `include/m-lib/` |
 
 ### Wii
 
@@ -85,10 +90,40 @@ The game can also run on any PC with support for OpenGL 2.0 and played with keyb
 Building requires the following additional libraries, which you can install with your system package manager: `zlib`, `glfw3` and `glew`. You can then use CMake and gcc to build. The already existing Makefile is for the Wii platform only and might be removed sometime later.
 
 ```bash
-mkdir build_pc
+mkdir -p build_pc
 cd build_pc
-cmake ..
-make
+cmake .. -DCMAKE_BUILD_TYPE=Debug
+make -j"$(nproc)"
 ```
 
-Please also copy the fragment and vertex shaders from `resources/` next to your `assets/` directory.
+**Running.** The binary loads `config.json` and its texture pack (the
+`paths.texturepack` config value — default `assets/`, which also holds
+`vertex.shader` and `fragment.shader`) **relative to the current working
+directory**. Launching `./cavex` straight from `build_pc/` therefore aborts with
+`Assertion 'vertex' failed`, because the shaders cannot be found. Instead, set
+up a small run directory and launch from inside it:
+
+```bash
+mkdir -p run && cd run
+ln -sfn ../../assets assets        # textures + vertex/fragment shaders
+cp ../../config_pc.json config.json
+python3 ../../gen_world.py saves   # generates saves/world (the world list is empty without one)
+../cavex
+```
+
+Controls are WASD + mouse look, left/right mouse button to mine/place, Space to
+jump, Left-Shift to sneak, E for the inventory and F2 for a screenshot. See
+[`controls.md`](controls.md) for the full list.
+
+## Tests
+
+Headless unit tests (no OpenGL) run via:
+
+```bash
+make test
+```
+
+This configures `build_test/`, runs **62 tests**, enforces a per-test coverage
+gate (each test must cover at least one new line), and refreshes
+[`badges/coverage.json`](badges/coverage.json). After changing tests, run
+`make test` and commit the updated badge file if the percentage shifts.

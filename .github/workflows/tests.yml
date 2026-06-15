@@ -2,6 +2,8 @@ name: Unit tests
 
 on:
   pull_request:
+  push:
+    branches: [master]
 
 jobs:
   unit-tests:
@@ -13,7 +15,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc make
+          sudo apt-get install -y cmake gcc make zlib1g-dev
 
       - name: Test with coverage
+        timeout-minutes: 15
         run: make test
+
+      - name: Verify coverage badge
+        run: git diff --exit-code badges/coverage.json
