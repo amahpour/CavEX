@@ -9,10 +9,14 @@
 .SECONDARY:
 #---------------------------------------------------------------------------------
 
-ifneq (,$(filter test,$(MAKECMDGOALS)))
-.PHONY: test
+ifneq (,$(filter test pc play,$(MAKECMDGOALS)))
+.PHONY: test pc play
 test:
 	@bash scripts/run_tests.sh
+pc:
+	@bash scripts/build_pc.sh
+play:
+	@bash scripts/run_pc.sh
 else
 
 ifeq ($(strip $(DEVKITPPC)),)

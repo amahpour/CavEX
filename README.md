@@ -85,31 +85,17 @@ cavex
 
 ### GNU/Linux
 
-The game can also run on any PC with support for OpenGL 2.0 and played with keyboard and mouse.
-
-Building requires the following additional libraries, which you can install with your system package manager: `zlib`, `glfw3` and `glew`. You can then use CMake and gcc to build. The already existing Makefile is for the Wii platform only and might be removed sometime later.
-
-```bash
-mkdir -p build_pc
-cd build_pc
-cmake .. -DCMAKE_BUILD_TYPE=Debug
-make -j"$(nproc)"
-```
-
-**Running.** The binary loads `config.json` and its texture pack (the
-`paths.texturepack` config value — default `assets/`, which also holds
-`vertex.shader` and `fragment.shader`) **relative to the current working
-directory**. Launching `./cavex` straight from `build_pc/` therefore aborts with
-`Assertion 'vertex' failed`, because the shaders cannot be found. Instead, set
-up a small run directory and launch from inside it:
+The game also runs on any PC with OpenGL 2.0 support, played with keyboard and
+mouse. Install the build dependencies with your package manager — `zlib`,
+`glfw3` and `glew` — then build and play with a single command:
 
 ```bash
-mkdir -p run && cd run
-ln -sfn ../../assets assets        # textures + vertex/fragment shaders
-cp ../../config_pc.json config.json
-python3 ../../gen_world.py saves   # generates saves/world (the world list is empty without one)
-../cavex
+make play
 ```
+
+This builds the native binary, stages a run directory for it (texture pack, PC
+config and a freshly generated world) and launches the game. Use `make pc` if
+you just want to build the binary without running it.
 
 Controls are WASD + mouse look, left/right mouse button to mine/place, Space to
 jump, Left-Shift to sneak, E for the inventory and F2 for a screenshot. See
