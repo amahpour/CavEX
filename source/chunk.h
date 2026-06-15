@@ -27,10 +27,9 @@
 #include "cglm/cglm.h"
 #include <m-lib/m-i-list.h>
 
-#include "block/blocks.h"
+#include "block/blocks_data.h"
 #include "chunk_mesher.h"
 #include "platform/displaylist.h"
-#include "world.h"
 
 #define CHUNK_SIZE_BITS 0xF
 #define CHUNK_SIZE 16
@@ -43,6 +42,8 @@
 #define W2C_COORD(x) ((x)&CHUNK_SIZE_BITS)
 
 typedef uint32_t c_coord_t;
+
+struct world;
 
 struct chunk {
 	mat4 model_view;
@@ -83,5 +84,7 @@ void chunk_set_light(struct chunk* c, c_coord_t x, c_coord_t y, c_coord_t z,
 					 uint8_t light);
 void chunk_render(struct chunk* c, bool pass, float x, float y, float z);
 void chunk_pre_render(struct chunk* c, mat4 view, bool has_fog);
+
+#include "block/blocks.h"
 
 #endif

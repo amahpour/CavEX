@@ -13,6 +13,9 @@ extern const size_t g_tests_util_count;
 extern const test_entry_t g_tests_aabb[];
 extern const size_t g_tests_aabb_count;
 
+extern const test_entry_t g_tests_blocks[];
+extern const size_t g_tests_blocks_count;
+
 extern const test_entry_t g_tests_face_occlusion[];
 extern const size_t g_tests_face_occlusion_count;
 
@@ -25,6 +28,36 @@ extern const size_t g_tests_daytime_count;
 extern const test_entry_t g_tests_config[];
 extern const size_t g_tests_config_count;
 
+extern const test_entry_t g_tests_nbt[];
+extern const size_t g_tests_nbt_count;
+
+extern const test_entry_t g_tests_lighting[];
+extern const size_t g_tests_lighting_count;
+
+extern const test_entry_t g_tests_recipe[];
+extern const size_t g_tests_recipe_count;
+
+extern const test_entry_t g_tests_tool[];
+extern const size_t g_tests_tool_count;
+
+extern const test_entry_t g_tests_entity[];
+extern const size_t g_tests_entity_count;
+
+extern const test_entry_t g_tests_chunk[];
+extern const size_t g_tests_chunk_count;
+
+extern const test_entry_t g_tests_inventory[];
+extern const size_t g_tests_inventory_count;
+
+extern const test_entry_t g_tests_window[];
+extern const size_t g_tests_window_count;
+
+extern const test_entry_t g_tests_level[];
+extern const size_t g_tests_level_count;
+
+extern const test_entry_t g_tests_region[];
+extern const size_t g_tests_region_count;
+
 const char* g_current_test = "";
 
 typedef struct {
@@ -32,17 +65,28 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[7];
-static const size_t group_count = 7;
+static test_group_t groups[18];
+static const size_t group_count = 18;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
 	groups[1] = (test_group_t){g_tests_util, g_tests_util_count};
 	groups[2] = (test_group_t){g_tests_aabb, g_tests_aabb_count};
-	groups[3] = (test_group_t){g_tests_face_occlusion, g_tests_face_occlusion_count};
-	groups[4] = (test_group_t){g_tests_buffer, g_tests_buffer_count};
-	groups[5] = (test_group_t){g_tests_daytime, g_tests_daytime_count};
-	groups[6] = (test_group_t){g_tests_config, g_tests_config_count};
+	groups[3] = (test_group_t){g_tests_blocks, g_tests_blocks_count};
+	groups[4] = (test_group_t){g_tests_face_occlusion, g_tests_face_occlusion_count};
+	groups[5] = (test_group_t){g_tests_buffer, g_tests_buffer_count};
+	groups[6] = (test_group_t){g_tests_daytime, g_tests_daytime_count};
+	groups[7] = (test_group_t){g_tests_config, g_tests_config_count};
+	groups[8] = (test_group_t){g_tests_nbt, g_tests_nbt_count};
+	groups[9] = (test_group_t){g_tests_lighting, g_tests_lighting_count};
+	groups[10] = (test_group_t){g_tests_recipe, g_tests_recipe_count};
+	groups[11] = (test_group_t){g_tests_tool, g_tests_tool_count};
+	groups[12] = (test_group_t){g_tests_entity, g_tests_entity_count};
+	groups[13] = (test_group_t){g_tests_chunk, g_tests_chunk_count};
+	groups[14] = (test_group_t){g_tests_inventory, g_tests_inventory_count};
+	groups[15] = (test_group_t){g_tests_window, g_tests_window_count};
+	groups[16] = (test_group_t){g_tests_level, g_tests_level_count};
+	groups[17] = (test_group_t){g_tests_region, g_tests_region_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {

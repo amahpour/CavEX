@@ -1,4 +1,9 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "harness.h"
+#include "test_path.h"
 #include "util.h"
 
 TEST(hash_u32_zero) {
@@ -63,6 +68,17 @@ TEST(hsv2rgb_all_hues) {
 	}
 }
 
+TEST(file_read_fixture) {
+	char path[512];
+	void* data;
+
+	test_fixture_path(path, sizeof(path), "config_valid.json");
+	data = file_read(path);
+	ASSERT(data != NULL);
+	free(data);
+	ASSERT(file_read("/tmp/cavex_missing_file_read_test.bin") == NULL);
+}
+
 const test_entry_t g_tests_util[] = {
 	{"hash_u32_zero", test_hash_u32_zero},
 	{"nibble_even_odd", test_nibble_even_odd},
@@ -70,6 +86,7 @@ const test_entry_t g_tests_util[] = {
 	{"rand_gen_range", test_rand_gen_range},
 	{"rand_gen_flt", test_rand_gen_flt},
 	{"hsv2rgb_all_hues", test_hsv2rgb_all_hues},
+	{"file_read_fixture", test_file_read_fixture},
 };
 
 const size_t g_tests_util_count

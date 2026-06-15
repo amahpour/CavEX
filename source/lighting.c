@@ -19,6 +19,7 @@
 
 #include <assert.h>
 
+#include "block/blocks.h"
 #include "lighting.h"
 
 void lighting_heightmap_update(uint8_t* heightmap, c_coord_t x, w_coord_t y,
