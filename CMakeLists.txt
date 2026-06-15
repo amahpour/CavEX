@@ -2,7 +2,21 @@ cmake_minimum_required(VERSION 3.14)
 
 project(cavex C)
 
-add_compile_options(-O2 -g)
+option(CAVEX_TESTS_ONLY "Build unit tests without the game binary" OFF)
+option(BUILD_TESTING "Build and register unit tests" OFF)
+option(CAVEX_COVERAGE "Instrument unit tests for gcov" OFF)
+
+if(CAVEX_COVERAGE)
+	add_compile_options(-g)
+else()
+	add_compile_options(-O2 -g)
+endif()
+
+if(CAVEX_TESTS_ONLY)
+	enable_testing()
+	add_subdirectory(tests)
+	return()
+endif()
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
@@ -155,3 +169,8 @@ set_target_properties(
 set_property(TARGET cavex PROPERTY INTERPROCEDURAL_OPTIMIZATION True)
 
 target_link_libraries(cavex ${CMAKE_THREAD_LIBS_INIT} ZLIB::ZLIB glfw GLEW::GLEW OpenGL::GL m)
+
+if(BUILD_TESTING)
+	enable_testing()
+	add_subdirectory(tests)
+endif()
