@@ -36,10 +36,81 @@ def p_float(v):  return struct.pack(">f", v)
 
 # ---------------- terrain ----------------
 AIR, STONE, GRASS, DIRT, BEDROCK, LOG, LEAVES, SNOW = 0, 1, 2, 3, 7, 17, 18, 80
-SEED = 42            # matches level.dat RandomSeed
+# Beta 1.7.3 ids below are all registered + non-NULL in
+# source/block/blocks_data.h + source/block/blocks.c (verified).
+WATER, LAVA = 9, 11                      # still source variants
+GRAVEL = 13
+GOLD_ORE, IRON_ORE, COAL_ORE = 14, 15, 16
+LAPIS_ORE = 21
+DIAMOND_ORE = 56
+REDSTONE_ORE = 73
+SEED = 42            # matches level.dat RandomSeed; terrain + strata derive from it
 BASE_Y = 62          # baseline surface height (sea-level-ish)
 SNOW_LINE = 90       # ground at/above this y gets a snow surface (128-cap world)
 CELL = 24            # value-noise lattice spacing in blocks
+
+def h(wx, wz, y, salt):
+    """Deterministic pure-stdlib hash -> 32-bit unsigned, seeded from SEED.
+
+    No randomness/wall-clock: same (wx, wz, y, salt) always yields the same
+    value, so the region is byte-identical across runs. Mixes the coordinates
+    with fixed odd primes (xorshift-style) and masks to 32 bits.
+    """
+    n = (SEED & 0xFFFFFFFF)
+    n = (n * 1597334677 + (wx & 0xFFFFFFFF) * 3812015801) & 0xFFFFFFFF
+    n = (n * 1597334677 + (wz & 0xFFFFFFFF) * 2654435761) & 0xFFFFFFFF
+    n = (n * 1597334677 + (y & 0xFFFFFFFF) * 40503) & 0xFFFFFFFF
+    n = (n * 1597334677 + (salt & 0xFFFFFFFF) * 2246822519) & 0xFFFFFFFF
+    n ^= (n >> 15)
+    n = (n * 2246822519) & 0xFFFFFFFF
+    n ^= (n >> 13)
+    n = (n * 3266489917) & 0xFFFFFFFF
+    n ^= (n >> 16)
+    return n
+
+def chance(wx, wz, y, salt, prob):
+    """True with probability ~prob (0..1), deterministically."""
+    return h(wx, wz, y, salt) < int(prob * 0x100000000)
+
+def strata_block(wx, wz, y):
+    """Block id for a sub-surface cell at world column (wx, wz), height y.
+
+    Layout (y rises from 0):
+      y == 0            -> bedrock (solid floor)
+      1 <= y <= 3       -> rough bedrock/stone mix (vanilla-style floor)
+      otherwise         -> stone body, with scattered ores + rare lava/water
+    Returns STONE by default; callers handle dirt/grass at the top.
+    """
+    if y == 0:
+        return BEDROCK
+    if y <= 3:
+        # higher chance of bedrock lower down: y1 ~75%, y2 ~50%, y3 ~25%
+        return BEDROCK if chance(wx, wz, y, 1, (4 - y) * 0.25) else STONE
+
+    # Rare fluid pockets (single static source blocks, no flow sim).
+    if y < 10 and chance(wx, wz, y, 2, 0.004):
+        return LAVA
+    if 12 <= y <= 48 and chance(wx, wz, y, 3, 0.0015):
+        return WATER
+
+    # Ore veins: depth-banded probabilities, small clusters via per-cell hash.
+    # Common ores in the upper stone body.
+    if chance(wx, wz, y, 4, 0.012):
+        return COAL_ORE
+    if y < 64 and chance(wx, wz, y, 5, 0.010):
+        return IRON_ORE
+    if 4 <= y <= 40 and chance(wx, wz, y, 6, 0.006):
+        return GRAVEL
+    # Rarer ores get deeper.
+    if y < 32 and chance(wx, wz, y, 7, 0.004):
+        return GOLD_ORE
+    if y < 16 and chance(wx, wz, y, 8, 0.005):
+        return REDSTONE_ORE
+    if y < 30 and chance(wx, wz, y, 9, 0.003):
+        return LAPIS_ORE
+    if y < 16 and chance(wx, wz, y, 10, 0.002):
+        return DIAMOND_ORE
+    return STONE
 
 # ---------------- heightmap (deterministic value-noise) ----------------
 def _hash01(ix, iz):
@@ -117,8 +188,9 @@ def build_chunk(cx, cz):
             wx, wz = cx * 16 + x, cz * 16 + z
             base = (x * 16 + z) * 128       # x*128*16 + z*128
             surf = surface_y(wx, wz)        # per-column surface height (relief)
-            blocks[base + 0] = BEDROCK
-            for y in range(1, surf - 4):        blocks[base + y] = STONE
+            # Layered sub-surface: bedrock floor, stone body, ores + fluid pockets
+            # (deterministic from SEED via strata_block()), up to the surface.
+            for y in range(0, surf - 4):        blocks[base + y] = strata_block(wx, wz, y)
             for y in range(surf - 4, surf):     blocks[base + y] = DIRT
             blocks[base + surf] = surface_block(surf)   # snow on high ground, else grass
             top = surf
@@ -271,10 +343,24 @@ def main():
     assert SPAWN_Y == sy + 1, f"SpawnY {SPAWN_Y} not just above surface {sy}"
     assert SPAWN[1] > sy and SPAWN[1] <= sy + 2, "Player.Pos Y not safely on the surface"
 
+    # (5) strata present: bedrock floor + ores + fluid pockets (from strata_block)
+    sbi = spawn_chunk.find(b"Blocks") + len("Blocks") + 4
+    spawn_blocks = spawn_chunk[sbi:sbi + 32768]
+    assert spawn_blocks[((24 % 16) * 16 + (24 % 16)) * 128 + 0] == BEDROCK, "bedrock missing at y=0"
+    ore_ids = {COAL_ORE, IRON_ORE, GOLD_ORE, REDSTONE_ORE, LAPIS_ORE, DIAMOND_ORE}
+    ores_found = ore_ids & set(spawn_blocks)
+    lava_low = any(spawn_blocks[c * 128 + y] == LAVA
+                   for c in range(256) for y in range(10))
+    water_mid = any(spawn_blocks[c * 128 + y] == WATER
+                    for c in range(256) for y in range(12, 49))
+    assert len(ores_found) >= 1, "no ore ids found in spawn chunk"
+    assert lava_low, "no LAVA block at y<10 in spawn chunk"
+    assert water_mid, "no WATER block at mid-depth in spawn chunk"
+
     print(f"self-check OK: relief {min(heights)}..{max(heights)} "
           f"({len(heights)} heights), {snow_cols} snow column(s) >= y{SNOW_LINE}, "
           f"region max y {region_max} < 128, spawn solid at y{sy} (SpawnY {SPAWN_Y}), "
-          f"'Claude World' preserved")
+          f"strata ores {sorted(ores_found)} + lava/water, 'Claude World' preserved")
 
 if __name__ == "__main__":
     main()
