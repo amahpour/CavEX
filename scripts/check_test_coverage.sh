@@ -27,7 +27,7 @@ OBJECTS=(
 	"__/source/network/inventory_logic.c.o"
 	"__/source/network/level_archive.c.o"
 	"__/source/network/region_archive.c.o"
-	"__/source/chunk.c.o"
+	"__/source/chunk_storage.c.o"
 	"__/source/entity/entity_id.c.o"
 )
 

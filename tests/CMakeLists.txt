@@ -22,7 +22,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/network/inventory_logic.c
 	${CMAKE_SOURCE_DIR}/source/network/level_archive.c
 	${CMAKE_SOURCE_DIR}/source/network/region_archive.c
-	${CMAKE_SOURCE_DIR}/source/chunk.c
+	${CMAKE_SOURCE_DIR}/source/chunk_storage.c
 	${CMAKE_SOURCE_DIR}/source/entity/entity_id.c
 	stubs/chunk_link_stub.c
 	stubs/game_state_stub.c

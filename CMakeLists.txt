@@ -146,6 +146,7 @@ add_executable(cavex
 
 				source/chunk_mesher.c
 				source/chunk.c
+				source/chunk_storage.c
 				source/daytime.c
 				source/lighting.c
 				source/main.c
