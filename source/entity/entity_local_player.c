@@ -27,6 +27,32 @@
 // the player rises steadily without being launched through the ceiling.
 #define BUBBLE_COLUMN_PUSH 0.25F
 
+// Double-tap window in ticks. The game ticks at 20 Hz (50 ms/tick, main.c:237),
+// so 5 ticks ~= 250 ms.
+#define JUMP_TAP_WINDOW 5
+
+// Vertical speed (blocks/tick) used while flying.
+#define FLY_SPEED 0.4F
+
+// Pure double-tap detector — see declaration in entity.h. Keeps no engine state
+// so it can be unit-tested in isolation.
+bool detect_double_tap(bool pressed, int* window) {
+	if(!pressed) {
+		if(*window > 0)
+			(*window)--;
+		return false;
+	}
+
+	// fresh press
+	if(*window > 0) {
+		*window = 0;
+		return true; // second tap within the window -> toggle
+	}
+
+	*window = JUMP_TAP_WINDOW; // first tap -> open the window
+	return false;
+}
+
 static void liquid_aabb(struct AABB* out, struct block_info* blk_info) {
 	int block_height = (blk_info->block->metadata & 0x8) ?
 		16 :
@@ -83,6 +109,7 @@ static bool entity_tick(struct entity* e) {
 	int forward = 0;
 	int strafe = 0;
 	bool jumping = false;
+	bool sneaking = false;
 
 	if(e->data.local_player.capture_input) {
 		if(input_held(IB_FORWARD))
@@ -98,7 +125,18 @@ static bool entity_tick(struct entity* e) {
 			strafe--;
 
 		jumping = input_held(IB_JUMP);
+		sneaking = input_held(IB_SNEAK);
+
+		// double-tap jump toggles creative flight (local-only, not persisted)
+		if(detect_double_tap(input_pressed(IB_JUMP),
+							  &e->data.local_player.jump_tap_window))
+			e->data.local_player.flying = !e->data.local_player.flying;
+	} else {
+		// keep the window from going stale while input is not captured
+		e->data.local_player.jump_tap_window = 0;
 	}
+
+	bool flying = e->data.local_player.flying;
 
 	int dist = forward * forward + strafe * strafe;
 
@@ -116,7 +154,16 @@ static bool entity_tick(struct entity* e) {
 	if(e->data.local_player.jump_ticks > 0)
 		e->data.local_player.jump_ticks--;
 
-	if(jumping) {
+	if(flying) {
+		// direct vertical control: jump rises, sneak descends, idle holds
+		if(jumping)
+			e->vel[1] = FLY_SPEED;
+		else if(sneaking)
+			e->vel[1] = -FLY_SPEED;
+		else
+			e->vel[1] = 0.0F;
+		e->data.local_player.jump_ticks = 0;
+	} else if(jumping) {
 		if(in_water || in_lava) {
 			e->vel[1] += 0.04F;
 		} else if(e->on_ground && e->data.local_player.jump_ticks == 0) {
@@ -176,7 +223,12 @@ static bool entity_tick(struct entity* e) {
 		}
 	}
 
-	if(in_lava) {
+	if(flying) {
+		// no gravity / buoyancy while flying; vel[1] is driven by jump/sneak
+		// above. keep horizontal drag for a controllable feel.
+		e->vel[0] *= slipperiness * 0.91F;
+		e->vel[2] *= slipperiness * 0.91F;
+	} else if(in_lava) {
 		e->vel[0] *= 0.5F;
 		e->vel[2] *= 0.5F;
 		e->vel[1] = e->vel[1] * 0.5F - 0.02F;
@@ -214,7 +266,7 @@ static bool entity_tick(struct entity* e) {
 		e->vel[1] *= 0.98F;
 	}
 
-	if(collision_xz && (in_lava || in_water)) {
+	if(!flying && collision_xz && (in_lava || in_water)) {
 		struct AABB tmp;
 		aabb_setsize_centered(&tmp, 0.6F, 1.8F, 0.6F);
 		aabb_translate(&tmp, e->pos[0] + e->vel[0],
@@ -251,4 +303,6 @@ void entity_local_player(uint32_t id, struct entity* e, struct world* w) {
 
 	entity_default_init(e, false, w);
 	e->data.local_player.jump_ticks = 0;
+	e->data.local_player.flying = false;
+	e->data.local_player.jump_tap_window = 0;
 }

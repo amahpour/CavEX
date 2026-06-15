@@ -1,14 +1,16 @@
 /*
 	Inert stubs for the address-taken render/atlas/placement symbols that real
-	block definition files (e.g. source/block/block_bubble_column.c) reference in
-	their struct block initializers. The unit test harness links the real block
-	.c files for coverage but does NOT pull in the GX-bound graphics units, so
-	these symbols are provided here as no-ops. They are never called by the
+	block definition files (e.g. block_candle.c, block_bubble_column.c) reference
+	in their struct block initializers. The unit test harness links the real
+	block .c files for coverage but does NOT pull in the GX-bound graphics units,
+	so these symbols are provided here as no-ops. They are never called by the
 	registry tests; only their addresses are taken at static-init time.
 */
 
 #include "block/blocks.h"
 #include "graphics/texture_atlas.h"
+#include "graphics/render_block.h"
+#include "graphics/render_item.h"
 
 size_t render_block_full(struct displaylist* d, struct block_info* this,
 						 enum side side, struct block_info* it,

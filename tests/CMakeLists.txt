@@ -6,6 +6,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/block/aabb.c
 	${CMAKE_SOURCE_DIR}/source/block/blocks_util.c
 	${CMAKE_SOURCE_DIR}/source/block/block_bubble_column.c
+	${CMAKE_SOURCE_DIR}/source/block/block_candle.c
 	${CMAKE_SOURCE_DIR}/source/block/face_occlusion.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/buffer.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/nbt_parsing.c
@@ -25,11 +26,13 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/network/region_archive.c
 	${CMAKE_SOURCE_DIR}/source/chunk_storage.c
 	${CMAKE_SOURCE_DIR}/source/entity/entity_id.c
+	${CMAKE_SOURCE_DIR}/source/entity/entity_local_player.c
 	stubs/chunk_link_stub.c
 	stubs/game_state_stub.c
 	stubs/blocks_stub.c
 	stubs/items_stub.c
 	stubs/render_stub.c
+	stubs/entity_player_stub.c
 )
 
 target_include_directories(cavex_testlib PRIVATE
@@ -68,6 +71,7 @@ add_executable(cavex_tests
 	test_recipe.c
 	test_tool.c
 	test_entity.c
+	test_double_tap.c
 	test_chunk.c
 	test_inventory.c
 	test_window.c

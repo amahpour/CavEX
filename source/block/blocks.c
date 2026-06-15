@@ -127,6 +127,7 @@ void blocks_init() {
 	// repeater
 	blocks[95] = &block_locked_chest;
 	blocks[96] = &block_trapdoor;
+	blocks[97] = &block_candle;
 	blocks[98] = &block_bubble_column;
 
 	for(int k = 0; k < 256; k++) {

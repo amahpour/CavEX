@@ -26,6 +26,7 @@ OBJECTS=(
 	"__/source/stack.c.o"
 	"__/source/block/aabb.c.o"
 	"__/source/block/blocks_util.c.o"
+	"__/source/block/block_candle.c.o"
 	"__/source/block/block_bubble_column.c.o"
 	"__/source/block/face_occlusion.c.o"
 	"__/source/cNBT/buffer.c.o"
@@ -46,6 +47,7 @@ OBJECTS=(
 	"__/source/network/region_archive.c.o"
 	"__/source/chunk_storage.c.o"
 	"__/source/entity/entity_id.c.o"
+	"__/source/entity/entity_local_player.c.o"
 )
 
 if [[ ! -x "$TEST_BIN" ]]; then
