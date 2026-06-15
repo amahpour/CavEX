@@ -1,0 +1,17 @@
+# Build output directories (Wii devkitPro, native PC, ASan)
+/build/
+/build_pc/
+/build_asan/
+/target/
+
+# Compiled Wii binaries
+*.dol
+*.elf
+
+# C build intermediates
+*.o
+*.d
+*.map
+
+# Autonomous test-rig screenshots (CAVEX_AUTOSHOT)
+autoshot_*.png
