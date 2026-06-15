@@ -4,6 +4,10 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/block/aabb.c
 	${CMAKE_SOURCE_DIR}/source/block/face_occlusion.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/buffer.c
+	${CMAKE_SOURCE_DIR}/source/daytime.c
+	${CMAKE_SOURCE_DIR}/source/config.c
+	${CMAKE_SOURCE_DIR}/source/parson/parson.c
+	stubs/game_state_stub.c
 )
 
 target_include_directories(cavex_testlib PRIVATE
@@ -11,6 +15,7 @@ target_include_directories(cavex_testlib PRIVATE
 	${CMAKE_SOURCE_DIR}/source
 	${CMAKE_SOURCE_DIR}/source/cNBT
 	${CMAKE_SOURCE_DIR}/source/block
+	${CMAKE_SOURCE_DIR}/source/parson
 )
 
 target_compile_definitions(cavex_testlib PRIVATE PLATFORM_PC CGLM_ALL_UNALIGNED)
@@ -23,11 +28,14 @@ endif()
 
 add_executable(cavex_tests
 	test_main.c
+	test_path.c
 	test_stack.c
 	test_util.c
 	test_aabb.c
 	test_face_occlusion.c
 	test_buffer.c
+	test_daytime.c
+	test_config.c
 )
 
 target_include_directories(cavex_tests PRIVATE
@@ -36,8 +44,13 @@ target_include_directories(cavex_tests PRIVATE
 	${CMAKE_SOURCE_DIR}/source
 	${CMAKE_SOURCE_DIR}/source/cNBT
 	${CMAKE_SOURCE_DIR}/source/block
+	${CMAKE_SOURCE_DIR}/source/parson
 )
-target_compile_definitions(cavex_tests PRIVATE PLATFORM_PC CGLM_ALL_UNALIGNED)
+target_compile_definitions(cavex_tests PRIVATE
+	PLATFORM_PC
+	CGLM_ALL_UNALIGNED
+	CAVEX_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 target_link_libraries(cavex_tests PRIVATE cavex_testlib m)
 set_target_properties(cavex_tests PROPERTIES C_STANDARD 99)
 

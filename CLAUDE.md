@@ -64,6 +64,25 @@ run — Mesa DRI3 `SwapBuffers` blocks on `xcb_wait_for_special_event` forever
 when the window isn't being composited. (Interactive play with a visible window
 is fine without it.)
 
+## Unit tests (native PC)
+
+End-to-end from repo root (no devkitPro, no GLFW):
+
+```bash
+make test
+```
+
+This configures `build_test/`, builds `cavex_tests`, runs `ctest`, enforces the
+**per-test coverage gate** (each test must add ≥1 newly executed line via gcov),
+then prints a per-file coverage summary.
+
+CI runs the same `make test` on **pull requests only**
+(`.github/workflows/tests.yml`).
+
+Coverage policy: `scripts/check_test_coverage.sh` runs every registered test in
+isolation; tests that add zero unique covered lines fail the gate and must be
+removed or rewritten. See GitHub issue #40 for tier 2+ expansion plans.
+
 Dev rig (TEMPORARY — REMOVE before any "release"/clean commit; HANDOFF item #3):
 - Debug overlay lines in `screen_ingame.c` (+ helpers in `input.c`, counters
   in `chunk_mesher.c`/`world.c`/`chunk.c`): WPAD state, mesh sent/recv,

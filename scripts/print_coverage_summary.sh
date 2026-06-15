@@ -10,6 +10,9 @@ OBJECTS=(
 	"__/source/block/aabb.c.o"
 	"__/source/block/face_occlusion.c.o"
 	"__/source/cNBT/buffer.c.o"
+	"__/source/daytime.c.o"
+	"__/source/config.c.o"
+	"__/source/parson/parson.c.o"
 )
 
 if [[ ! -x "$TEST_BIN" ]]; then
