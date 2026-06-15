@@ -79,6 +79,16 @@ TEST(file_read_fixture) {
 	ASSERT(file_read("/tmp/cavex_missing_file_read_test.bin") == NULL);
 }
 
+TEST(rand_gen_seed_sets_nonzero) {
+	struct random_gen gen = {.seed = 0};
+
+	rand_gen_seed(&gen);
+	// seeded from time(NULL); just ensure it is usable afterwards
+	uint32_t a = rand_gen(&gen);
+	uint32_t b = rand_gen(&gen);
+	ASSERT_NE(a, b);
+}
+
 const test_entry_t g_tests_util[] = {
 	{"hash_u32_zero", test_hash_u32_zero},
 	{"nibble_even_odd", test_nibble_even_odd},
@@ -87,6 +97,7 @@ const test_entry_t g_tests_util[] = {
 	{"rand_gen_flt", test_rand_gen_flt},
 	{"hsv2rgb_all_hues", test_hsv2rgb_all_hues},
 	{"file_read_fixture", test_file_read_fixture},
+	{"rand_gen_seed_sets_nonzero", test_rand_gen_seed_sets_nonzero},
 };
 
 const size_t g_tests_util_count
