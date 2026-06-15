@@ -5,6 +5,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/stack.c
 	${CMAKE_SOURCE_DIR}/source/block/aabb.c
 	${CMAKE_SOURCE_DIR}/source/block/blocks_util.c
+	${CMAKE_SOURCE_DIR}/source/block/block_bubble_column.c
 	${CMAKE_SOURCE_DIR}/source/block/block_candle.c
 	${CMAKE_SOURCE_DIR}/source/block/face_occlusion.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/buffer.c

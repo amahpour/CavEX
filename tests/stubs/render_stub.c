@@ -1,11 +1,14 @@
 /*
-	Test stubs for the graphics/render and placement symbols that the real
-	block definition structs (e.g. block_candle.c) take the address of. The
-	unit tests never render, so these bodies are intentionally inert -- they
-	exist only so the block translation units link into cavex_testlib.
+	Inert stubs for the address-taken render/atlas/placement symbols that real
+	block definition files (e.g. block_candle.c, block_bubble_column.c) reference
+	in their struct block initializers. The unit test harness links the real
+	block .c files for coverage but does NOT pull in the GX-bound graphics units,
+	so these symbols are provided here as no-ops. They are never called by the
+	registry tests; only their addresses are taken at static-init time.
 */
 
 #include "block/blocks.h"
+#include "graphics/texture_atlas.h"
 #include "graphics/render_block.h"
 #include "graphics/render_item.h"
 

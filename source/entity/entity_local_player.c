@@ -23,6 +23,10 @@
 
 #define EYE_HEIGHT 1.62F
 
+// Upward velocity imparted by a bubble column each tick. Small and clamped so
+// the player rises steadily without being launched through the ceiling.
+#define BUBBLE_COLUMN_PUSH 0.25F
+
 // Double-tap window in ticks. The game ticks at 20 Hz (50 ms/tick, main.c:237),
 // so 5 ticks ~= 250 ms.
 #define JUMP_TAP_WINDOW 5
@@ -248,6 +252,15 @@ static bool entity_tick(struct entity* e) {
 			e->vel[0] = fmaxf(fminf(e->vel[0], 0.15F), -0.15F);
 			e->vel[1] = fmaxf(e->vel[1], -0.15F);
 			e->vel[2] = fmaxf(fminf(e->vel[2], 0.15F), -0.15F);
+		} else if(entity_get_block(e, floorf(e->pos[0]),
+								   floorf(e->pos[1] - EYE_HEIGHT),
+								   floorf(e->pos[2]), &blk)
+				  && blk.type == BLOCK_BUBBLE_COLUMN) {
+			// Bubble elevator: push the player upward against gravity. The
+			// gravity applied above (e->vel[1] -= 0.08F) is overwritten with a
+			// small, clamped upward velocity so the player rises while inside
+			// the column and falls normally once they leave it. Up-only MVP.
+			e->vel[1] = BUBBLE_COLUMN_PUSH;
 		}
 
 		e->vel[1] *= 0.98F;

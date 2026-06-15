@@ -29,4 +29,7 @@ void test_blocks_init(void) {
 	blocks[BLOCK_GLASS] = &transparent_block;
 	blocks[BLOCK_TORCH] = &torch_block;
 	blocks[BLOCK_DIRT] = &solid_block;
+
+	// real block definition, linked into cavex_testlib for coverage
+	blocks[BLOCK_BUBBLE_COLUMN] = &block_bubble_column;
 }

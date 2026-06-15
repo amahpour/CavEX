@@ -1,6 +1,7 @@
 #include "block/blocks.h"
 #include "block/blocks_data.h"
 #include "harness.h"
+#include "stubs/blocks_stub.h"
 
 TEST(blocks_side_helpers) {
 	int x, y, z;
@@ -61,6 +62,34 @@ TEST(blocks_all_sides) {
 	ASSERT(x == 0 && y == 0 && z == -1);
 }
 
+TEST(block_bubble_column_registered) {
+	test_blocks_init();
+
+	struct block* b = blocks[BLOCK_BUBBLE_COLUMN];
+
+	// registered and named (issue #32 acceptance: blocks[98] != NULL, name set)
+	ASSERT(b != NULL);
+	ASSERT(b->name != NULL);
+	ASSERT(strcmp(b->name, "Bubble Column") == 0);
+
+	// see-through so it renders translucent and never occludes
+	ASSERT(b->can_see_through);
+
+	struct block_data blk = {.type = BLOCK_BUBBLE_COLUMN};
+	struct block_info info = {.block = &blk};
+
+	// passable: no collision box against entities (the property that lets the
+	// player stand inside the column and be pushed upward). Calling the real
+	// getBoundingBox callback also gives the coverage gate a unique line.
+	struct AABB box;
+	ASSERT_EQ(b->getBoundingBox(&info, true, &box), 0U);
+	// still solid for ray/mesh queries (non-entity)
+	ASSERT_EQ(b->getBoundingBox(&info, false, &box), 1U);
+
+	// drops nothing
+	ASSERT_EQ(b->getDroppedItem(&info, NULL, NULL), 0U);
+}
+
 TEST(candle_block_registered) {
 	// The candle (issue #30) is a registration-only, light-emitting block.
 	// blocks_init() is GX/graphics-bound and is not linked into the test
@@ -91,6 +120,7 @@ const test_entry_t g_tests_blocks[] = {
 	{"blocks_side_helpers", test_blocks_side_helpers},
 	{"block_drop_default_item", test_block_drop_default_item},
 	{"blocks_all_sides", test_blocks_all_sides},
+	{"block_bubble_column_registered", test_block_bubble_column_registered},
 	{"candle_block_registered", test_candle_block_registered},
 };
 

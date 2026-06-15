@@ -123,6 +123,7 @@ extern struct block block_detector_rail;
 extern struct block block_redstone_torch;
 extern struct block block_redstone_torch_lit;
 extern struct block block_ladder;
+extern struct block block_bubble_column;
 extern struct block block_farmland;
 extern struct block block_crops;
 extern struct block block_planks;
