@@ -28,4 +28,8 @@ echo "==> Coverage summary"
 bash "$ROOT_DIR/scripts/print_coverage_summary.sh" "$BUILD_DIR"
 
 echo
+echo "==> Coverage badge"
+bash "$ROOT_DIR/scripts/export_coverage_badge.sh" "$BUILD_DIR"
+
+echo
 echo "All tests passed with coverage gate."

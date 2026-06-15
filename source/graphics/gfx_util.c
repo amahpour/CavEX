@@ -20,6 +20,7 @@
 #include <assert.h>
 
 #include "../daytime.h"
+#include "../block/blocks.h"
 #include "../game/game_state.h"
 #include "../platform/displaylist.h"
 #include "../platform/gfx.h"
