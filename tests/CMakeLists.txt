@@ -60,6 +60,7 @@ add_executable(cavex_tests
 	test_buffer.c
 	test_daytime.c
 	test_config.c
+	test_json.c
 	test_nbt.c
 	test_lighting.c
 	test_recipe.c

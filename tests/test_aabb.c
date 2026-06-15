@@ -71,6 +71,29 @@ TEST(aabb_ray_hit_front) {
 	ASSERT(!aabb_intersection_ray(&box, &parallel, NULL));
 }
 
+TEST(aabb_ray_hit_max_faces) {
+	struct AABB box = unit_cube();
+	enum side side = SIDE_MAX;
+
+	// from +x going -x -> hits the right face
+	struct ray right = {.x = 2.0F, .y = 0.5F, .z = 0.5F,
+						 .dx = -1.0F, .dy = 0.0F, .dz = 0.0F};
+	ASSERT(aabb_intersection_ray(&box, &right, &side));
+	ASSERT_EQ(side, SIDE_RIGHT);
+
+	// from below going +y -> hits the bottom face
+	struct ray bottom = {.x = 0.5F, .y = -1.0F, .z = 0.5F,
+						 .dx = 0.0F, .dy = 1.0F, .dz = 0.0F};
+	ASSERT(aabb_intersection_ray(&box, &bottom, &side));
+	ASSERT_EQ(side, SIDE_BOTTOM);
+
+	// from +z going -z -> hits the back face
+	struct ray back = {.x = 0.5F, .y = 0.5F, .z = 2.0F,
+					   .dx = 0.0F, .dy = 0.0F, .dz = -1.0F};
+	ASSERT(aabb_intersection_ray(&box, &back, &side));
+	ASSERT_EQ(side, SIDE_BACK);
+}
+
 const test_entry_t g_tests_aabb[] = {
 	{"aabb_setsize_translate", test_aabb_setsize_translate},
 	{"aabb_intersection_overlap", test_aabb_intersection_overlap},
@@ -78,6 +101,7 @@ const test_entry_t g_tests_aabb[] = {
 	{"aabb_ray_hit_left", test_aabb_ray_hit_left},
 	{"aabb_ray_hit_top", test_aabb_ray_hit_top},
 	{"aabb_ray_hit_front", test_aabb_ray_hit_front},
+	{"aabb_ray_hit_max_faces", test_aabb_ray_hit_max_faces},
 };
 
 const size_t g_tests_aabb_count

@@ -28,6 +28,9 @@ extern const size_t g_tests_daytime_count;
 extern const test_entry_t g_tests_config[];
 extern const size_t g_tests_config_count;
 
+extern const test_entry_t g_tests_json[];
+extern const size_t g_tests_json_count;
+
 extern const test_entry_t g_tests_nbt[];
 extern const size_t g_tests_nbt_count;
 
@@ -65,8 +68,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[18];
-static const size_t group_count = 18;
+static test_group_t groups[19];
+static const size_t group_count = 19;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -87,6 +90,7 @@ static void init_groups(void) {
 	groups[15] = (test_group_t){g_tests_window, g_tests_window_count};
 	groups[16] = (test_group_t){g_tests_level, g_tests_level_count};
 	groups[17] = (test_group_t){g_tests_region, g_tests_region_count};
+	groups[18] = (test_group_t){g_tests_json, g_tests_json_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {
