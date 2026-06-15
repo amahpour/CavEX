@@ -320,6 +320,15 @@ bool level_archive_write_player(struct level_archive* la, vec3 position,
 								enum world_dim dimension) {
 	assert(la && la->data);
 
+	// Refuse to persist a corrupted origin/void spawn (issue #5): the
+	// intermittent origin-snap zeroes the live player position, and without
+	// this guard that (0,0,0) overwrites the real spawn in level.dat and then
+	// sticks across every later load. Leave the stored position untouched so
+	// the last valid spawn survives. (Mirrors the dev TRAP's at-origin test.)
+	if(position && position[0] > -1.5F && position[0] < 1.5F
+	   && position[2] > -1.5F && position[2] < 1.5F && position[1] < 2.0F)
+		return false;
+
 	nbt_node* pos;
 	if(!level_archive_read(la, LEVEL_PLAYER_POSITION, &pos, 0))
 		return false;
