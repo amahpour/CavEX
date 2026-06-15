@@ -1,6 +1,7 @@
 # Build output directories (Wii devkitPro, native PC, ASan)
 /build/
 /build_pc/
+/build_test/
 /build_asan/
 /target/
 
