@@ -97,17 +97,17 @@ cd ~/code/CavEX/build_pc/run
 vblank_mode=0 CAVEX_AUTOPLAY=1 CAVEX_AUTOSHOT=120 timeout 45 ../cavex
 ```
 
-Read the `autoshot_*.png` and confirm each acceptance criterion. Copy the frames
-that prove the fix to `verification/issue-<N>/NN-<what>.png` (you'll embed them
-in the PR — see Step 6). For **Wii-platform** issues, the truth is the Dolphin
-frame dump (`run-wii-dolphin`), not the PC autoshot.
+Read the `autoshot_*.png` and confirm each acceptance criterion. Keep the frames
+that prove the fix (you'll embed them in the PR — see Step 6). For **Wii-platform**
+issues, the truth is the Dolphin frame dump (`run-wii-dolphin`), not the PC autoshot.
 
-> **Embedding the proof.** GitHub has no token API to attach images to a PR (the
-> web drag-drop is cookie-gated). CavEX is **public**, so the clean path is:
-> commit the frames on this branch, embed with the raw URL —
-> `![](https://raw.githubusercontent.com/amahpour/CavEX/issue-<N>-<slug>/verification/issue-<N>/01.png)`
-> — renders inline in the PR. (Alternatives: `gh release upload` to a draft
-> release; cookie-based helpers like `gh-attach`. See `write-bulletproof-issue`.)
+> **Embedding the proof — NEVER commit images to the repo** (they bloat git
+> history forever; we had to `filter-repo`-purge them on 2026-06-15). GitHub has
+> no token API to attach images to a PR, so host frames as **release assets** and
+> embed the asset URL — nothing lands in the source tree:
+> `gh release upload verification issue-<N>-01.png --clobber` →
+> `![](https://github.com/amahpour/CavEX/releases/download/verification/issue-<N>-01.png)`
+> See `write-bulletproof-issue` for the one-time release setup.
 
 ---
 

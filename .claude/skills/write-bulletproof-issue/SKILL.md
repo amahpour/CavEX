@@ -112,27 +112,32 @@ eyeball in the morning. Make it executable:
 PNG in a PR is the one fiddly bit, so the issue's verify recipe should assume
 this path:
 
-> **There is no token-authenticated API to attach an image to a GitHub comment/PR.**
-> The web drag-drop posts to a **cookie-gated** `github.com/upload/...` endpoint;
-> GitHub refuses PAT/OAuth/App tokens there by design. An unattended agent can't
-> "just upload" a screenshot. Real options, best-for-CavEX first:
+> **NEVER commit screenshots to the repo.** Binary PNGs in `verification/` (or
+> anywhere in the tree) bloat the repo and live in git history **forever**; purging
+> them later needs a `git filter-repo` rewrite + force-push of `master` that churns
+> every commit SHA. We had to do exactly that cleanup on **2026-06-15** — do not
+> recreate the mess. Host frames **off-tree** and embed the URL.
 >
-> 1. **Commit frames to the PR branch (default — CavEX is public).** Copy chosen
->    autoshots to `verification/issue-<N>/NN-<what>.png`, commit on the branch,
->    embed inline with the raw URL:
->    `![](https://raw.githubusercontent.com/amahpour/CavEX/<branch>/verification/issue-<N>/01.png)`.
->    Zero extra auth, headless-safe. They ride in git history — squash or delete
->    the `verification/` dir before merge if you don't want them permanent.
-> 2. **Release assets (cleaner history).** `gh release upload <draft-tag> f.png`
->    → embed the asset URL. Token-based, nothing in the source tree. Needs
->    `gh auth login` first (not currently authed).
-> 3. **Native user-attachments CDN** (the real drag-drop URL): only via
->    browser-cookie helpers (`gh-attach`, `gh-image`) or ready-made agent skills
->    (`tonkotsuboy/github-upload-image-to-pr`). One-time browser login; works for
->    private repos. Overkill for a public hobby fork.
+> **There is no token-authenticated API to attach an image to a GitHub comment/PR**
+> (the web drag-drop hits a cookie-gated `github.com/upload/...` endpoint that
+> rejects PAT/OAuth/App tokens). So:
+>
+> 1. **Release assets — REQUIRED default.** Upload frames to a single reused
+>    prerelease and embed the asset URL (token-based, headless-safe, **nothing in
+>    the source tree or git history**):
+>    ```bash
+>    # one-time: gh release create verification --prerelease \
+>    #   --title "Verification frames (PR proof-of-play)" --notes "Off-tree image host."
+>    gh release upload verification issue-<N>-01-<what>.png --clobber
+>    ```
+>    `![](https://github.com/amahpour/CavEX/releases/download/verification/issue-<N>-01-<what>.png)`
+>    Asset names must be **unique within the release** — always prefix with `issue-<N>-`.
+> 2. **Native user-attachments CDN** (the real drag-drop URL): only via
+>    browser-cookie helpers (`gh-attach`, `gh-image`). One-time browser login;
+>    overkill for a public hobby fork.
 >
 > Known gap, not a local quirk: cli/cli#12960, cli/cli#13256,
-> anthropics/claude-code#26831. Default to #1 for the overnight rig.
+> anthropics/claude-code#26831. **Default to release assets; never commit frames.**
 
 ---
 
@@ -173,8 +178,9 @@ HUD path, so one fix covers both.)
 - Build: PC Debug (`build_pc`, `cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j`)
 - Test: `make test`
 - Visual: `vblank_mode=0 CAVEX_AUTOPLAY=1 CAVEX_AUTOSHOT=120 timeout 45 ../cavex`;
-  an `autoshot_*.png` shows the box centered on slot 0. Commit that frame to
-  `verification/issue-<N>/` and embed it in the PR.
+  an `autoshot_*.png` shows the box centered on slot 0. Upload that frame to the
+  `verification` prerelease (`gh release upload verification issue-<N>-01.png
+  --clobber`) and embed its asset URL in the PR — never commit it to the repo.
 
 ## Constraints / don't-break
 Draw-only; don't touch input or selection state. Surgical — this issue only.

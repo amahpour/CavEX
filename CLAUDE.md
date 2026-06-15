@@ -122,6 +122,11 @@ roadmap are gitignored.
   MotionPlus off = `Extension/Attach MotionPlus = False`.
 - Don't use `pkill -f`/`pgrep -x dolphin-emu-nogui` (see wii-example-game
   CLAUDE.md: 15-char comm truncation + self-match).
+- Don't commit screenshots / proof-of-play PNGs to the repo — host them as GitHub
+  **release assets** (the `verification` prerelease) and embed the asset URL in the
+  PR (`gh release upload verification issue-<N>-01.png --clobber`). Committed images
+  bloat git history forever; we had to `git filter-repo`-purge a `verification/` dir
+  and force-push `master` on 2026-06-15. See `write-bulletproof-issue`.
 
 ## Git remote
 
