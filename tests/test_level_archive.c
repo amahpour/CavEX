@@ -179,6 +179,38 @@ TEST(level_archive_inventory_roundtrip) {
 	string_clear(world_dir);
 }
 
+TEST(level_archive_write_player_rejects_origin) {
+	struct level_archive la = {0};
+	string_t world_dir;
+	vec3 pos_out = {0};
+	vec2 rot_out = {0};
+
+	copy_fixture_world(world_dir);
+	ASSERT(level_archive_create(&la, world_dir));
+
+	// A normal, non-origin position writes through and round-trips.
+	ASSERT(level_archive_write_player(&la, (vec3) {100.0F, 70.0F, 100.0F},
+									  (vec2) {0.0F, 0.0F}, NULL,
+									  WORLD_DIM_OVERWORLD));
+	ASSERT(level_archive_read_player(&la, pos_out, rot_out, NULL, NULL));
+	ASSERT_NEAR(pos_out[0], 100.0, 0.0001);
+	ASSERT_NEAR(pos_out[1], 70.0, 0.0001);
+	ASSERT_NEAR(pos_out[2], 100.0, 0.0001);
+
+	// The corrupted (0,0,0)/void spawn (issue #5) is refused and must NOT
+	// overwrite the stored position.
+	ASSERT(!level_archive_write_player(&la, (vec3) {0.0F, 0.0F, 0.0F},
+									   (vec2) {0.0F, 0.0F}, NULL,
+									   WORLD_DIM_OVERWORLD));
+	ASSERT(level_archive_read_player(&la, pos_out, rot_out, NULL, NULL));
+	ASSERT_NEAR(pos_out[0], 100.0, 0.0001);
+	ASSERT_NEAR(pos_out[1], 70.0, 0.0001);
+	ASSERT_NEAR(pos_out[2], 100.0, 0.0001);
+
+	level_archive_destroy(&la);
+	string_clear(world_dir);
+}
+
 const test_entry_t g_tests_level[] = {
 	{"level_archive_read_write_time", test_level_archive_read_write_time},
 	{"level_archive_read_level_name", test_level_archive_read_level_name},
@@ -186,6 +218,8 @@ const test_entry_t g_tests_level[] = {
 	{"level_archive_player_roundtrip", test_level_archive_player_roundtrip},
 	{"level_archive_inventory_roundtrip",
 	 test_level_archive_inventory_roundtrip},
+	{"level_archive_write_player_rejects_origin",
+	 test_level_archive_write_player_rejects_origin},
 };
 
 const size_t g_tests_level_count
