@@ -58,6 +58,8 @@ struct entity {
 		struct entity_local_player {
 			int jump_ticks;
 			bool capture_input;
+			bool flying;
+			int jump_tap_window;
 		} local_player;
 		struct entity_item {
 			struct item_data item;
@@ -72,6 +74,13 @@ DICT_DEF2(dict_entity, uint32_t, M_BASIC_OPLIST, struct entity, M_POD_OPLIST)
 
 void entity_local_player(uint32_t id, struct entity* e, struct world* w);
 bool entity_local_player_block_collide(vec3 pos, struct block_info* blk_info);
+
+// Pure double-tap detector for the flight toggle. `pressed` is the just-pressed
+// edge of the jump button; `window` holds the ticks remaining in the open
+// double-tap window (decremented by the caller each tick). Returns true on the
+// second press inside the window (i.e. a toggle should fire); the window is
+// reset in either case. Pure (no engine state) so it is unit-testable.
+bool detect_double_tap(bool pressed, int* window);
 
 void entity_item(uint32_t id, struct entity* e, bool server, void* world,
 				 struct item_data it);
