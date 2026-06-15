@@ -1,3 +1,14 @@
+## Hotbar selection
+
+The Wii has no scroll wheel; the hotbar cycles with the **Plus / Minus** buttons
+(the equivalent of the PC mouse wheel). Defaults from `config.json`
+(`scroll_right` / `scroll_left`):
+
+| Action | Wiimote | Classic controller |
+| --- | :-: | :-: |
+| Hotbar next | `+` (plus) | `ZR`, or `+` |
+| Hotbar previous | `−` (minus) | `ZL`, or `−` |
+
 ## Wii input config mapping
 
 | Wiimote | config id |
