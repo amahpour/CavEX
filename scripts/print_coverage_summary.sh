@@ -28,6 +28,7 @@ OBJECTS=(
 	"__/source/network/region_archive.c.o"
 	"__/source/chunk_storage.c.o"
 	"__/source/entity/entity_id.c.o"
+	"__/source/entity/entity_local_player.c.o"
 )
 
 if [[ ! -x "$TEST_BIN" ]]; then
