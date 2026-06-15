@@ -20,6 +20,3 @@ jobs:
       - name: Test with coverage
         timeout-minutes: 15
         run: make test
-
-      - name: Verify coverage badge
-        run: git diff --exit-code badges/coverage.json

@@ -125,5 +125,5 @@ make test
 
 This configures `build_test/`, runs **62 tests**, enforces a per-test coverage
 gate (each test must cover at least one new line), and refreshes
-[`badges/coverage.json`](badges/coverage.json). After changing tests, run
-`make test` and commit the updated badge file if the percentage shifts.
+[`badges/coverage.json`](badges/coverage.json). Commit the updated badge file
+when you add or change tests.

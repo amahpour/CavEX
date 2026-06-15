@@ -62,7 +62,8 @@ if [[ "$line_total" -eq 0 ]]; then
 	exit 1
 fi
 
-percent="$(awk "BEGIN {printf \"%.1f\", 100.0 * $hit_total / $line_total}")"
+percent="$(awk -v h="$hit_total" -v t="$line_total" \
+	'BEGIN { printf "%.1f", int(1000 * h / t) / 10 }')"
 
 mkdir -p "$(dirname "$OUT")"
 cat >"$OUT" <<EOF
