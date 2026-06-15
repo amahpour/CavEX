@@ -41,24 +41,29 @@ carry back to the `.dol`.
    injection needed):
 
    ```bash
-   CAVEX_AUTOPLAY=1 CAVEX_AUTOSHOT=120 timeout 45 ../cavex
+   vblank_mode=0 CAVEX_AUTOPLAY=1 CAVEX_AUTOSHOT=120 timeout 45 ../cavex
+   # vblank_mode=0 is MANDATORY for unattended runs (see Gotchas) or the
+   #   process hangs in SwapBuffers when the window isn't composited.
    # AUTOPLAY: auto-enters first world ~4s after the menu appears
    # AUTOSHOT=N: dumps framebuffer to ./autoshot_NNNNNN.png every N frames
    # exit 124 = survived; Read the autoshot PNGs to see what rendered
    ```
 
-4. **Crash? gdb one-liner** (binary has symbols):
+4. **Crash? gdb one-liner** (binary has symbols; run under gdb since yama
+   blocks attach):
 
    ```bash
-   CAVEX_AUTOPLAY=1 timeout 40 gdb -batch -ex 'set debuginfod enabled off' \
-     -ex run -ex 'bt 15' --args ../cavex
+   vblank_mode=0 CAVEX_AUTOPLAY=1 timeout 40 gdb -batch \
+     -ex 'set debuginfod enabled off' -ex run -ex 'bt 15' --args ../cavex
+   # for a HANG (not crash): let it hang, then `kill -INT <inferior pid>` so
+   # gdb stops and runs the bt; use `thread apply all bt` for deadlocks.
    ```
 
 5. **Memory bugs / second opinion — ASan build** (`build_asan/`, same run dir):
 
    ```bash
    cd ~/code/CavEX/build_asan && make -j"$(nproc)"
-   cd ../build_pc/run && CAVEX_AUTOPLAY=1 timeout 45 ../../build_asan/cavex
+   cd ../build_pc/run && vblank_mode=0 CAVEX_AUTOPLAY=1 timeout 45 ../../build_asan/cavex
    ```
 
    **Interpretation rule learned the hard way:** ASan clean + normal build
@@ -71,6 +76,10 @@ carry back to the `.dol`.
   aligned stores into plain-malloc'd structs (`struct chunk` leads with a
   cglm `mat4`) segfault on world entry. The flag line applies to ALL build
   types, so even "Debug" was -O3-native before.
+- Unattended/background runs MUST set `vblank_mode=0`: Mesa DRI3
+  `glfwSwapBuffers` → `xcb_wait_for_special_event` blocks forever when the
+  window isn't being composited (looks like a frame-~20 hang). Interactive
+  play with a visible/focused window is fine without it.
 - GLFW must use X11 (`glfwInitHint` patch in `pc/gfx.c`): Wayland GLFW +
   distro GLEW (GLX-only) = "Could not load extended OpenGL functions!" then
   segfault on the first extension call.
