@@ -177,6 +177,10 @@ void chunk_set_block(struct chunk* c, c_coord_t x, c_coord_t y, c_coord_t z,
 		| (blk.metadata << (off * 4));
 	c->rebuild_displist = true;
 
+	// temporary diagnostics
+	extern volatile int dbg_cs_count;
+	dbg_cs_count++;
+
 	chunk_trigger_neighbour_update(c, x, y, z);
 }
 

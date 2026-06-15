@@ -1,0 +1,117 @@
+# CavEX (patched clone) — Agent Start
+
+## What this is
+
+Clone of [xtreme8000/CavEX](https://github.com/xtreme8000/CavEX) (Minecraft
+Beta 1.7.3 recreation for Wii) at upstream `8f70987`, carrying **local
+uncommitted patches** that make it build, run, and stay stable in Dolphin on
+this machine — plus a native PC dev build and an autonomous test rig. The
+playable world ("Claude World") is generated, not from Mojang assets.
+
+Skills in `.claude/skills/` cover the three core workflows: `run-wii-dolphin`,
+`dev-native-pc`, `gen-beta-world`. Read those before reinventing commands.
+**`HANDOFF.md` has the current status + open-items roadmap — start there.**
+
+Status: fully playable both ways; ~25 min continuous play, zero crashes on the
+current build. Everything is still uncommitted (HANDOFF item #1).
+
+## The two builds — when to use which
+
+| | Wii build (`make` → `CavEX.dol`) | PC build (`build_pc/`) |
+|---|---|---|
+| Use for | platform truth: 24 MB MEM1 pressure, GX, WPAD input | game logic: world/NBT/lighting/gameplay |
+| Debugging | Dolphin frame dump + on-screen debug overlay | native gdb, live asserts, ASan (`build_asan/`) |
+| Iteration | rebuild + restage SD + relaunch | `make` + run a binary |
+
+Bug-hunt heuristic proven here: if ASan runs clean but the normal build
+crashes, suspect **alignment**, not memory corruption (ASan's allocator
+over-aligns — it masked the `-march=native`/malloc-16 crash).
+
+## Local patches (uncommitted, on `master`) — keep intact
+
+Stability/correctness:
+- `source/chunk_mesher.c` — mesher request buffers are **static** (the
+  per-remesh 17.5 KB malloc failed under heap pressure → remeshes silently
+  stopped forever: "broken block never disappears").
+- `source/platform/wii/displaylist.c` + `displaylist.h` — `oom` flag; unchecked
+  malloc/realloc used to write GX vertices **through NULL** (millions of
+  Dolphin "Invalid write to 0x0" lines, garbage-polygon meshes).
+- `source/network/server_local.h` — `MAX_VIEW_DISTANCE 5 → 3` (+ matching fog
+  in `main.c`) for MEM1 headroom.
+- `source/main.c` — `chdir("sd:/")` after `fatInitDefault()` (cwd isn't SD
+  root when Dolphin boots a .dol directly).
+- `CMakeLists.txt` — `-O3 -march=native` → `-O2` (**`-march=native` crashes
+  the PC build**: AVX 32-byte aligned stores into 16-byte-aligned malloc'd
+  `struct chunk`); plus `target_include_directories(... include)` for m-lib.
+- `source/platform/pc/gfx.c` — force GLFW X11 backend (Wayland GLFW +
+  GLX-only GLEW = segfault in first GL extension call).
+
+Input workarounds (Dolphin's emulated Wiimote **never delivers extension
+data** to libogc — Nunchuk and Classic both enumerate but stream zeros; the
+Ⓒ/Ⓩ HUD glyphs render regardless and prove nothing):
+- `config.json` — mine/place also bound to core buttons A (id 4) / "2" (id 7).
+- `source/platform/input.c` — camera fallback: IR-pointer edge-pan when no
+  extension stick (dead-zone 0.15, speed 2.0); look **freezes while LMB held**
+  because CavEX resets dig progress whenever the aimed cell changes.
+- Mouse-wheel hotbar switching (PC build): `source/platform/pc/gfx.c` wires the
+  GLFW scroll callback → `input_native_scroll` (`input.c`/`input.h`) which
+  latches notches as one-shot "pressed" edges on virtual keys 2000/2001;
+  `config_pc.json` binds `scroll_left/right` to them. (Wii build already scrolls
+  via `+`/`-` → wheel; folding wheel into the Wii path is HANDOFF item #7.)
+
+PC-build running gotcha: prepend **`vblank_mode=0`** for any unattended/headless
+run — Mesa DRI3 `SwapBuffers` blocks on `xcb_wait_for_special_event` forever
+when the window isn't being composited. (Interactive play with a visible window
+is fine without it.)
+
+Dev rig (TEMPORARY — REMOVE before any "release"/clean commit; HANDOFF item #3):
+- Debug overlay lines in `screen_ingame.c` (+ helpers in `input.c`, counters
+  in `chunk_mesher.c`/`world.c`/`chunk.c`): WPAD state, mesh sent/recv,
+  lighting queue, dig state machine, `mallinfo` free (NB: mallinfo can't see
+  ungrown sbrk — don't trust it as absolute headroom).
+- `CAVEX_AUTOSHOT=N` env — game dumps its own framebuffer every N frames
+  (`autoshot_*.png` in cwd). `CAVEX_AUTOPLAY=1` — auto-enters the first world
+  (`screen_select_world.c`). Together these give an agent eyes and hands with no
+  screenshot tool or input injection.
+- **TRAP** (origin-snap hunt, currently armed): RPC ring buffers in
+  `client_interface.c` + `server_local.c`, detector + dump writer in `main.c`.
+  On a >8-block teleport or origin-snap during play it appends a forensic dump
+  (breadcrumbs + last 32 client/server RPCs) to `build_pc/run/trap_dump.txt`.
+  Never fired in clean play. See HANDOFF item #2.
+- `local_player_id` re-resolve (`game_state.h`, `main.c`, `client_interface.c`)
+  — added chasing the dict-dangling theory that was then DISPROVEN. Harmless but
+  NOT a real fix; remove with the rest.
+
+Untracked-but-required (upstream ships these dirs empty): vendored libs in
+`source/{cNBT,lodepng,parson,cglm}/` + `include/m-lib/`; `assets/*.shader`
+(PC build loads shaders from the **texturepack dir**, not cwd);
+`gen_world.py`; build dirs.
+
+## Don'ts (each cost real debugging time)
+
+- Don't trust `assert` as a guard here — both Makefile (`-DNDEBUG`) and
+  Release CMake compile it out; upstream asserts malloc/file-read successes.
+  PC dev builds must be `-DCMAKE_BUILD_TYPE=Debug`.
+- Don't put the SD image anywhere but `~/.local/share/dolphin-emu/Load/WiiSD.raw`
+  (`Wii/` is the NAND; Dolphin silently auto-creates a blank card at the real
+  path and your populated one is ignored).
+- Don't bind Dolphin input to device `Keyboard Mouse` — the real XInput2
+  device is `Virtual core pointer`. Key names are keysyms (`w`, `space`,
+  `Escape`); extension bindings go inside `[Wiimote1]` as `Nunchuk/...`;
+  `RelativeMouse` never fires under XWayland (absolute `Cursor` works);
+  MotionPlus off = `Extension/Attach MotionPlus = False`.
+- Don't use `pkill -f`/`pgrep -x dolphin-emu-nogui` (see wii-example-game
+  CLAUDE.md: 15-char comm truncation + self-match).
+
+## Repo migration context (intent only — DO NOT act without explicit ask)
+
+User plans to move this work to a personal fork eventually. A Cursor session
+(2026-06-11, in agentsview) surveyed all 39 upstream forks; the two that
+matter: **markkampstra/CavEX** (~40 ahead, active May 2026 — entities/mobs,
+death screen, dev console `tp/time/spawn/kill`) and **yyy257/fCavEX** (~238
+ahead — health/food/doors/signs/chests; incompatible save extensions). Agreed
+future sequence: commit local patches on a `wii-fixes` branch FIRST, then add
+`mark`/`fcavex` remotes, merge mark, cherry-pick from fCavEX. Expected
+conflicts: `screen_ingame.c` (our debug HUD vs mark's hearts/death screen);
+our `chunk_mesher.c` fix merges cleanly into both. No fork has creative mode.
+Nothing has been committed, forked, or pushed — keep it that way until asked.
