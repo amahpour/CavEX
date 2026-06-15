@@ -3,6 +3,7 @@
 /build_pc/
 /build_test/
 /build_asan/
+/build_ci/
 /target/
 
 # Compiled Wii binaries

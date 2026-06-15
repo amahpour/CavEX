@@ -2,9 +2,9 @@
 
 ## What this is
 
-Clone of [xtreme8000/CavEX](https://github.com/xtreme8000/CavEX) (Minecraft
-Beta 1.7.3 recreation for Wii) at upstream `8f70987`, forked to
-**[amahpour/CavEX](https://github.com/amahpour/CavEX)** and carrying **local
+**[amahpour/CavEX](https://github.com/amahpour/CavEX)** — authoritative repo for
+this project. Descended from [xtreme8000/CavEX](https://github.com/xtreme8000/CavEX)
+(Minecraft Beta 1.7.3 recreation for Wii, base `8f70987`), now carrying **local
 patches** that make it build, run, and stay stable in Dolphin on this machine — plus a native PC dev build and an autonomous test rig. The
 playable world ("Claude World") is generated, not from Mojang assets.
 
@@ -123,18 +123,17 @@ roadmap are gitignored.
 - Don't use `pkill -f`/`pgrep -x dolphin-emu-nogui` (see wii-example-game
   CLAUDE.md: 15-char comm truncation + self-match).
 
-## Repo migration context
+## Git remote
 
-**Done (2026-06-14):** work is committed and forked. `origin` = the fork
-`git@github.com:amahpour/CavEX.git`, `upstream` = `xtreme8000/CavEX`; local
-patches landed on the fork's `master` via merged PR #1 (vendored deps + all
-patches) and PR #2 (`vblank_mode=0` doc fix), their branches deleted.
+**Only `origin`** — `git@github.com:amahpour/CavEX.git`. Do not add
+`xtreme8000/CavEX` as a remote; this fork is the canonical project.
 
-**Remaining (INTENT ONLY — do not act without an explicit ask).** A Cursor session
-(2026-06-11, in agentsview) surveyed all 39 upstream forks; the two that
-matter: **markkampstra/CavEX** (~40 ahead, active May 2026 — entities/mobs,
-death screen, dev console `tp/time/spawn/kill`) and **yyy257/fCavEX** (~238
-ahead — health/food/doors/signs/chests; incompatible save extensions). Planned
-next: add `mark`/`fcavex` remotes, merge mark, then cherry-pick from fCavEX. Expected
+## Optional upstream features (INTENT ONLY — do not act without explicit ask)
+
+A Cursor session (2026-06-11, in agentsview) surveyed other CavEX forks; the two
+that matter: **markkampstra/CavEX** (~40 ahead — entities/mobs, death screen,
+dev console `tp/time/spawn/kill`) and **yyy257/fCavEX** (~238 ahead —
+health/food/doors/signs/chests; incompatible save extensions). If ever wanted:
+add `mark`/`fcavex` remotes temporarily, merge/cherry-pick, then remove. Expected
 conflicts: `screen_ingame.c` (our debug HUD vs mark's hearts/death screen);
 our `chunk_mesher.c` fix merges cleanly into both. No fork has creative mode.
