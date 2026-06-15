@@ -76,6 +76,8 @@ void lighting_update_at_block(
 				   .z = source.z,
 			   });
 
+	bool force_source = true;
+
 	while(!stack_empty(&queue)) {
 		struct lighting_update_entry current;
 		stack_pop(&queue, &current);
@@ -122,10 +124,14 @@ void lighting_update_at_block(
 
 		uint8_t new_light = (new_light_torch << 4) | new_light_sky;
 
-		if(old_light != new_light
-		   || (source.x == current.x && source.y == current.y
-			   && source.z == current.z)) {
+		bool is_source = source.x == current.x && source.y == current.y
+						 && source.z == current.z;
+
+		if(old_light != new_light || (is_source && force_source)) {
 			set_light(user, current.x, current.y, current.z, new_light);
+
+			if(is_source)
+				force_source = false;
 
 			for(enum side s = 0; s < SIDE_MAX; s++) {
 				int x, y, z;
