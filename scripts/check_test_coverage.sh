@@ -26,6 +26,7 @@ OBJECTS=(
 	"__/source/stack.c.o"
 	"__/source/block/aabb.c.o"
 	"__/source/block/blocks_util.c.o"
+	"__/source/block/block_candle.c.o"
 	"__/source/block/face_occlusion.c.o"
 	"__/source/cNBT/buffer.c.o"
 	"__/source/cNBT/nbt_parsing.c.o"
