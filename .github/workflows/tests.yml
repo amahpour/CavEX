@@ -14,7 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc gcov make
+          sudo apt-get install -y cmake gcc make
 
       - name: Test with coverage
         run: make test
