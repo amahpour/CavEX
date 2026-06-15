@@ -55,7 +55,9 @@ struct game_state {
 	struct camera camera;
 	struct camera_ray_result camera_hit;
 	struct world world;
-	struct entity* local_player;
+	struct entity* local_player;	// CACHED pointer into `entities` — invalid
+									// after any dict mutation; re-resolve from id
+	uint32_t local_player_id;
 	dict_entity_t entities;
 	uint64_t world_time;
 	ptime_t world_time_start;

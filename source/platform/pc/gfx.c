@@ -94,19 +94,21 @@ static void framebuffer_size_callback(GLFWwindow* window, int width,
 
 static void scroll_callback(GLFWwindow* window, double xoffset,
 							double yoffset) {
-	// TODO: buttons are not released
-	if(glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED) {
-		if(yoffset > 0) {
-			// input_set_status(IB_SCROLL_LEFT, GLFW_PRESS);
-		} else if(yoffset < 0) {
-			// input_set_status(IB_SCROLL_RIGHT, GLFW_PRESS);
-		}
-	}
+	// drive the hotbar only while the camera is captured (in-game); in menus
+	// the cursor is visible and the wheel should do nothing
+	if(glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
+		input_native_scroll(yoffset);
 }
 
 static GLuint shader_prog;
 
 void gfx_setup() {
+#ifdef GLFW_PLATFORM_X11
+	// Force the X11 backend: under a Wayland session GLFW 3.4+ picks Wayland,
+	// but distro GLEW only resolves GL functions via GLX — glewInit() then
+	// fails and the first extension call segfaults.
+	glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
 	glfwInit();
 
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
@@ -116,7 +118,7 @@ void gfx_setup() {
 	glfwMakeContextCurrent(window);
 
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-	// glfwSetScrollCallback(window, scroll_callback);
+	glfwSetScrollCallback(window, scroll_callback);
 
 	if(glfwRawMouseMotionSupported())
 		glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);

@@ -54,6 +54,19 @@ static struct thread_channel mesher_requests;
 static struct thread_channel mesher_results;
 static struct thread_channel mesher_empty_msg;
 
+// temporary diagnostics: visible on the in-game debug overlay
+volatile int cm_dbg_sent = 0;
+volatile int cm_dbg_recv = 0;
+
+// Statically allocated request buffers. These used to be malloc'd per remesh
+// (~17.5 KB each); on the Wii's small heap that allocation starts failing
+// once enough chunks/displaylists are resident, after which every remesh is
+// silently refused forever ("block breaks but never disappears"). Static
+// buffers cannot fail.
+static struct block_data
+	mesher_blocks[CHUNK_MESHER_QLENGTH][(CHUNK_SIZE + 2) * (CHUNK_SIZE + 2)
+									   * (CHUNK_SIZE + 2)];
+
 static int chunk_test_side(enum side* on_sides, c_coord_t x, c_coord_t y,
 						   c_coord_t z) {
 	assert(on_sides);
@@ -495,8 +508,6 @@ static void chunk_mesher_build(struct chunk_mesher_rpc* req) {
 	}
 
 	chunk_test_init(req->request.blocks, req->result.reachable);
-
-	free(req->request.blocks);
 }
 
 static void* chunk_mesher_local_thread(void* user) {
@@ -515,8 +526,10 @@ void chunk_mesher_init() {
 	tchannel_init(&mesher_results, CHUNK_MESHER_QLENGTH);
 	tchannel_init(&mesher_empty_msg, CHUNK_MESHER_QLENGTH);
 
-	for(int k = 0; k < CHUNK_MESHER_QLENGTH; k++)
+	for(int k = 0; k < CHUNK_MESHER_QLENGTH; k++) {
+		rpc_msg[k].request.blocks = mesher_blocks[k];
 		tchannel_send(&mesher_empty_msg, rpc_msg + k, true);
+	}
 
 	struct thread t;
 	thread_create(&t, chunk_mesher_local_thread, NULL, 4);
@@ -540,6 +553,7 @@ void chunk_mesher_receive() {
 		chunk_unref(result->chunk);
 
 		tchannel_send(&mesher_empty_msg, result, true);
+		cm_dbg_recv++;
 	}
 }
 
@@ -550,19 +564,12 @@ bool chunk_mesher_send(struct chunk* c) {
 	if(!tchannel_receive(&mesher_empty_msg, (void**)&request, false))
 		return false;
 
-	struct block_data* bd
-		= malloc((CHUNK_SIZE + 2) * (CHUNK_SIZE + 2) * (CHUNK_SIZE + 2)
-				 * sizeof(struct block_data));
-
-	if(!bd) {
-		tchannel_send(&mesher_empty_msg, request, true);
-		return false;
-	}
+	// request->request.blocks points at this slot's static buffer
+	struct block_data* bd = request->request.blocks;
 
 	chunk_ref(c);
 
 	request->chunk = c;
-	request->request.blocks = bd;
 
 	for(w_coord_t y = -1; y < CHUNK_SIZE + 1; y++) {
 		for(w_coord_t z = -1; z < CHUNK_SIZE + 1; z++) {
@@ -573,5 +580,6 @@ bool chunk_mesher_send(struct chunk* c) {
 	}
 
 	tchannel_send(&mesher_requests, request, true);
+	cm_dbg_sent++;
 	return true;
 }

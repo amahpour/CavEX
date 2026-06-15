@@ -30,7 +30,7 @@
 #include "server_world.h"
 
 #define MAX_REGIONS 4
-#define MAX_VIEW_DISTANCE 5 // in chunks
+#define MAX_VIEW_DISTANCE 3 // in chunks (was 5; freed ~8MB MEM1 so displaylist allocs stop failing)
 #define MAX_CHUNKS ((MAX_VIEW_DISTANCE * 2 + 2) * (MAX_VIEW_DISTANCE * 2 + 2))
 
 struct server_local {

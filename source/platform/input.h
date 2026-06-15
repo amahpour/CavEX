@@ -63,4 +63,9 @@ bool input_joystick(float dt, float* x, float* y);
 void input_pointer_enable(bool enable);
 bool input_pointer(float* x, float* y, float* angle);
 
+#ifdef PLATFORM_PC
+// fed by the GLFW scroll callback; mouse wheel drives hotbar switching
+void input_native_scroll(double yoffset);
+#endif
+
 #endif

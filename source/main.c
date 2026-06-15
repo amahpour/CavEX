@@ -26,6 +26,7 @@
 
 #ifdef PLATFORM_WII
 #include <fat.h>
+#include <unistd.h>
 #endif
 
 #include "chunk_mesher.h"
@@ -47,13 +48,32 @@
 #include "cglm/cglm.h"
 #include "lodepng/lodepng.h"
 
+#ifndef NDEBUG
+// TRAP (origin-snap hunt): RPC rings defined in client_interface.c /
+// server_local.c
+struct trap_crpc_entry {
+	int type;
+	float a, b, c;
+	unsigned seq;
+};
+extern struct trap_crpc_entry trap_crpc_ring[32];
+extern unsigned trap_crpc_seq;
+struct trap_srpc_entry {
+	int type;
+	float a, b, c;
+	unsigned seq;
+};
+extern struct trap_srpc_entry trap_srpc_ring[32];
+extern unsigned trap_srpc_seq;
+#endif
+
 int main(void) {
 	gstate.quit = false;
 	gstate.camera = (struct camera) {
 		.x = 0, .y = 0, .z = 0, .rx = 0, .ry = 0, .controller = {0, 0, 0}};
 	gstate.config.fov = 70.0F;
-	gstate.config.render_distance = 192.0F;
-	gstate.config.fog_distance = 5 * 16.0F;
+	gstate.config.render_distance = 96.0F;
+	gstate.config.fog_distance = 3 * 16.0F;
 	gstate.world_loaded = false;
 	gstate.held_item_animation.punch.start = time_get();
 	gstate.held_item_animation.switch_item.start = time_get();
@@ -64,6 +84,10 @@ int main(void) {
 
 #ifdef PLATFORM_WII
 	fatInitDefault();
+	// When booted directly in Dolphin (not via the Homebrew Channel) the working
+	// directory isn't set to the SD root, so relative asset paths ("assets/...",
+	// "saves/...") fail to open. Pin the cwd to the SD card so they resolve.
+	chdir("sd:/");
 #endif
 
 	config_create(&gstate.config_user, "config.json");
@@ -110,6 +134,99 @@ int main(void) {
 			/ (float)DAY_LENGTH_TICKS;
 
 		clin_update();
+
+		// Defensive: re-resolve the cached local-player pointer from its stable
+		// id (the entity dict could mutate during clin_update()).
+		if(gstate.local_player)
+			gstate.local_player
+				= dict_entity_get(gstate.entities, gstate.local_player_id);
+
+#ifndef NDEBUG
+		{
+			// TEMP instrumentation (env-gated): heartbeat + scripted trunk dig
+			static int tf = 0;
+			tf++;
+			if(getenv("CAVEX_TRACE") && tf % 20 == 0) {
+				if(gstate.local_player)
+					printf("[t%5d] loaded=%d pos=(%.1f,%.1f,%.1f)\n", tf,
+						   gstate.world_loaded, gstate.local_player->pos[0],
+						   gstate.local_player->pos[1],
+						   gstate.local_player->pos[2]);
+				else
+					printf("[t%5d] loaded=%d (no local_player)\n", tf,
+						   gstate.world_loaded);
+			}
+			// TRAP: catch the player snapping to the world origin (or any
+			// teleport-sized jump) during normal play and dump the recent
+			// RPC history + position breadcrumbs to trap_dump.txt.
+			static vec3 crumbs[128];
+			static int crumb_n = 0, armed = 0, dumps = 0;
+			if(gstate.world_loaded && gstate.local_player) {
+				float* p = gstate.local_player->pos;
+
+				if(armed > 60) {
+					float* prev = crumbs[(crumb_n + 127) % 128];
+					float dx = p[0] - prev[0], dy = p[1] - prev[1],
+						  dz = p[2] - prev[2];
+					float jump2 = dx * dx + dy * dy + dz * dz;
+					bool at_origin = fabsf(p[0]) < 1.5F && fabsf(p[2]) < 1.5F
+						&& p[1] < 2.0F;
+					if((jump2 > 64.0F || at_origin) && dumps < 3) {
+						dumps++;
+						FILE* f = fopen("trap_dump.txt", "a");
+						if(f) {
+							fprintf(f, "==== TRAP #%d: %s (frame %d) ====\n",
+									dumps, at_origin ? "AT ORIGIN" : "POS JUMP",
+									tf);
+							fprintf(f, "pos now (%.2f,%.2f,%.2f)  prev (%.2f,%.2f,%.2f)  jump %.1f\n",
+									p[0], p[1], p[2], prev[0], prev[1], prev[2],
+									sqrtf(jump2));
+							fprintf(f, "local_player_id=%u screen=%s\n",
+									gstate.local_player_id,
+									gstate.current_screen == &screen_ingame ?
+										"ingame" : "other");
+							fprintf(f, "-- breadcrumbs (oldest->newest, every frame) --\n");
+							for(int k = 0; k < 128; k++) {
+								float* c = crumbs[(crumb_n + k) % 128];
+								if(k % 8 == 0 || k > 118)
+									fprintf(f, "  t-%03d (%.2f,%.2f,%.2f)\n",
+											128 - k, c[0], c[1], c[2]);
+							}
+							fprintf(f, "-- last client RPCs (type a b c) --\n");
+							for(unsigned k = 0; k < 32 && k < trap_crpc_seq; k++) {
+								unsigned i = (trap_crpc_seq - 1 - k) % 32;
+								fprintf(f, "  seq%u type=%d (%.1f,%.1f,%.1f)\n",
+										trap_crpc_ring[i].seq,
+										trap_crpc_ring[i].type,
+										trap_crpc_ring[i].a, trap_crpc_ring[i].b,
+										trap_crpc_ring[i].c);
+							}
+							fprintf(f, "-- last server RPCs (type a b c) --\n");
+							for(unsigned k = 0; k < 32 && k < trap_srpc_seq; k++) {
+								unsigned i = (trap_srpc_seq - 1 - k) % 32;
+								fprintf(f, "  seq%u type=%d (%.1f,%.1f,%.1f)\n",
+										trap_srpc_ring[i].seq,
+										trap_srpc_ring[i].type,
+										trap_srpc_ring[i].a, trap_srpc_ring[i].b,
+										trap_srpc_ring[i].c);
+							}
+							fprintf(f, "\n");
+							fclose(f);
+						}
+						printf("!!! TRAP fired (#%d) — see trap_dump.txt\n",
+							   dumps);
+					}
+				}
+
+				glm_vec3_copy(p, crumbs[crumb_n % 128]);
+				crumb_n++;
+				armed++;
+			} else {
+				// world not loaded: disarm so menu/load transitions don't trip
+				armed = 0;
+			}
+		}
+#endif
 
 		float tick_delta = time_diff_s(last_tick, time_get()) / 0.05F;
 
@@ -246,6 +363,31 @@ int main(void) {
 
 				lodepng_encode32_file(name, image, width, height);
 				free(image);
+			}
+		}
+
+		{
+			// CAVEX_AUTOSHOT=N: dump the framebuffer every N frames so an
+			// agent (or CI) can see what the game renders without a desktop
+			// screenshot tool. -2 = unread, -1 = disabled.
+			static int autoshot_every = -2;
+			static int autoshot_frame = 0;
+			if(autoshot_every == -2) {
+				const char* e = getenv("CAVEX_AUTOSHOT");
+				autoshot_every = (e && atoi(e) > 0) ? atoi(e) : -1;
+			}
+			if(autoshot_every > 0 && ++autoshot_frame % autoshot_every == 0) {
+				size_t width, height;
+				gfx_copy_framebuffer(NULL, &width, &height);
+				void* image = malloc(width * height * 4);
+				if(image) {
+					gfx_copy_framebuffer(image, &width, &height);
+					char name[64];
+					snprintf(name, sizeof(name), "autoshot_%06d.png",
+							 autoshot_frame);
+					lodepng_encode32_file(name, image, width, height);
+					free(image);
+				}
 			}
 		}
 

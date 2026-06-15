@@ -15,3 +15,6 @@
 
 # Autonomous test-rig screenshots (CAVEX_AUTOSHOT)
 autoshot_*.png
+
+# Local dev handoff notes (not part of project history)
+HANDOFF.md

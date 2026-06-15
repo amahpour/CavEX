@@ -450,7 +450,28 @@ void world_pre_render_clear(struct world* w) {
 	ilist_chunks_init(w->render);
 }
 
+// temporary diagnostics
+volatile int dbg_cs_count = 0;
+volatile int dbg_dirty_seen = 0;
+
 size_t world_build_chunks(struct world* w, size_t tokens) {
+	// temporary diagnostics: how many chunks currently carry a pending
+	// rebuild flag that this sweep can actually reach
+	{
+		int dirty = 0;
+		dict_wsection_it_t dit;
+		dict_wsection_it(dit, w->sections);
+		while(!dict_wsection_end_p(dit)) {
+			struct world_section* ds = &dict_wsection_ref(dit)->value;
+			for(size_t k = 0; k < COLUMN_HEIGHT; k++) {
+				if(ds->column[k] && ds->column[k]->rebuild_displist)
+					dirty++;
+			}
+			dict_wsection_next(dit);
+		}
+		dbg_dirty_seen = dirty;
+	}
+
 	ilist_chunks_it_t it;
 	ilist_chunks_it(it, w->render);
 
