@@ -3,9 +3,9 @@
 ## What this is
 
 Clone of [xtreme8000/CavEX](https://github.com/xtreme8000/CavEX) (Minecraft
-Beta 1.7.3 recreation for Wii) at upstream `8f70987`, carrying **local
-uncommitted patches** that make it build, run, and stay stable in Dolphin on
-this machine — plus a native PC dev build and an autonomous test rig. The
+Beta 1.7.3 recreation for Wii) at upstream `8f70987`, forked to
+**[amahpour/CavEX](https://github.com/amahpour/CavEX)** and carrying **local
+patches** that make it build, run, and stay stable in Dolphin on this machine — plus a native PC dev build and an autonomous test rig. The
 playable world ("Claude World") is generated, not from Mojang assets.
 
 Skills in `.claude/skills/` cover the three core workflows: `run-wii-dolphin`,
@@ -13,7 +13,7 @@ Skills in `.claude/skills/` cover the three core workflows: `run-wii-dolphin`,
 **`HANDOFF.md` has the current status + open-items roadmap — start there.**
 
 Status: fully playable both ways; ~25 min continuous play, zero crashes on the
-current build. Everything is still uncommitted (HANDOFF item #1).
+current build. All local work is committed to the `amahpour/CavEX` fork (`master`, via merged PRs #1 and #2).
 
 ## The two builds — when to use which
 
@@ -27,7 +27,7 @@ Bug-hunt heuristic proven here: if ASan runs clean but the normal build
 crashes, suspect **alignment**, not memory corruption (ASan's allocator
 over-aligns — it masked the `-march=native`/malloc-16 crash).
 
-## Local patches (uncommitted, on `master`) — keep intact
+## Local patches (committed to fork `master`) — keep intact
 
 Stability/correctness:
 - `source/chunk_mesher.c` — mesher request buffers are **static** (the
@@ -82,10 +82,11 @@ Dev rig (TEMPORARY — REMOVE before any "release"/clean commit; HANDOFF item #3
   — added chasing the dict-dangling theory that was then DISPROVEN. Harmless but
   NOT a real fix; remove with the rest.
 
-Untracked-but-required (upstream ships these dirs empty): vendored libs in
-`source/{cNBT,lodepng,parson,cglm}/` + `include/m-lib/`; `assets/*.shader`
-(PC build loads shaders from the **texturepack dir**, not cwd);
-`gen_world.py`; build dirs.
+Vendored / required, now committed in PR #1 (upstream ships these dirs empty):
+libs in `source/{cNBT,lodepng,parson,cglm}/` + `include/m-lib/`;
+`assets/*.shader` (PC build loads shaders from the **texturepack dir**, not
+cwd); `gen_world.py`. Build dirs, `*.dol`/`*.elf`, and the local `HANDOFF.md`
+roadmap are gitignored.
 
 ## Don'ts (each cost real debugging time)
 
@@ -103,15 +104,18 @@ Untracked-but-required (upstream ships these dirs empty): vendored libs in
 - Don't use `pkill -f`/`pgrep -x dolphin-emu-nogui` (see wii-example-game
   CLAUDE.md: 15-char comm truncation + self-match).
 
-## Repo migration context (intent only — DO NOT act without explicit ask)
+## Repo migration context
 
-User plans to move this work to a personal fork eventually. A Cursor session
+**Done (2026-06-14):** work is committed and forked. `origin` = the fork
+`git@github.com:amahpour/CavEX.git`, `upstream` = `xtreme8000/CavEX`; local
+patches landed on the fork's `master` via merged PR #1 (vendored deps + all
+patches) and PR #2 (`vblank_mode=0` doc fix), their branches deleted.
+
+**Remaining (INTENT ONLY — do not act without an explicit ask).** A Cursor session
 (2026-06-11, in agentsview) surveyed all 39 upstream forks; the two that
 matter: **markkampstra/CavEX** (~40 ahead, active May 2026 — entities/mobs,
 death screen, dev console `tp/time/spawn/kill`) and **yyy257/fCavEX** (~238
-ahead — health/food/doors/signs/chests; incompatible save extensions). Agreed
-future sequence: commit local patches on a `wii-fixes` branch FIRST, then add
-`mark`/`fcavex` remotes, merge mark, cherry-pick from fCavEX. Expected
+ahead — health/food/doors/signs/chests; incompatible save extensions). Planned
+next: add `mark`/`fcavex` remotes, merge mark, then cherry-pick from fCavEX. Expected
 conflicts: `screen_ingame.c` (our debug HUD vs mark's hearts/death screen);
 our `chunk_mesher.c` fix merges cleanly into both. No fork has creative mode.
-Nothing has been committed, forked, or pushed — keep it that way until asked.
