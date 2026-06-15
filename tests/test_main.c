@@ -19,6 +19,12 @@ extern const size_t g_tests_face_occlusion_count;
 extern const test_entry_t g_tests_buffer[];
 extern const size_t g_tests_buffer_count;
 
+extern const test_entry_t g_tests_daytime[];
+extern const size_t g_tests_daytime_count;
+
+extern const test_entry_t g_tests_config[];
+extern const size_t g_tests_config_count;
+
 const char* g_current_test = "";
 
 typedef struct {
@@ -26,8 +32,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[5];
-static const size_t group_count = 5;
+static test_group_t groups[7];
+static const size_t group_count = 7;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -35,6 +41,8 @@ static void init_groups(void) {
 	groups[2] = (test_group_t){g_tests_aabb, g_tests_aabb_count};
 	groups[3] = (test_group_t){g_tests_face_occlusion, g_tests_face_occlusion_count};
 	groups[4] = (test_group_t){g_tests_buffer, g_tests_buffer_count};
+	groups[5] = (test_group_t){g_tests_daytime, g_tests_daytime_count};
+	groups[6] = (test_group_t){g_tests_config, g_tests_config_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {
