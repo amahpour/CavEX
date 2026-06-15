@@ -9,6 +9,12 @@
 .SECONDARY:
 #---------------------------------------------------------------------------------
 
+ifneq (,$(filter test,$(MAKECMDGOALS)))
+.PHONY: test
+test:
+	@bash scripts/run_tests.sh
+else
+
 ifeq ($(strip $(DEVKITPPC)),)
 $(error "Please set DEVKITPPC in your environment. export DEVKITPPC=<path to>devkitPPC")
 endif
@@ -145,6 +151,8 @@ $(OUTPUT).elf: $(OFILES)
 
 -include $(DEPSDIR)/*.d
 
+#---------------------------------------------------------------------------------
+endif
 #---------------------------------------------------------------------------------
 endif
 #---------------------------------------------------------------------------------
