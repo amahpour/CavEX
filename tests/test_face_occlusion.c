@@ -22,10 +22,20 @@ TEST(face_occlusion_partial) {
 	ASSERT(face_occlusion_rect(8)->mask[7] != 0);
 }
 
+TEST(face_occlusion_not_covered) {
+	// a (smaller) is not fully covered by b (larger but disjoint bits):
+	// no mask word satisfies (a|b)==a, so the test returns false
+	struct face_occlusion small = *face_occlusion_rect(4);
+	struct face_occlusion large = *face_occlusion_rect(8);
+
+	ASSERT(!face_occlusion_test(&small, &large));
+}
+
 const test_entry_t g_tests_face_occlusion[] = {
 	{"face_occlusion_empty_passes", test_face_occlusion_empty_passes},
 	{"face_occlusion_full_blocks", test_face_occlusion_full_blocks},
 	{"face_occlusion_partial", test_face_occlusion_partial},
+	{"face_occlusion_not_covered", test_face_occlusion_not_covered},
 };
 
 const size_t g_tests_face_occlusion_count

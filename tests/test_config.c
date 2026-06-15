@@ -61,6 +61,22 @@ TEST(config_read_int_array) {
 	config_destroy(&cfg);
 }
 
+TEST(config_read_int_array_clamped) {
+	struct config cfg = {0};
+	char path[512];
+	int values[8] = {0};
+	size_t length = 8; // larger than the array in the fixture
+
+	test_fixture_path(path, sizeof(path), "config_valid.json");
+	ASSERT(config_create(&cfg, path));
+	// length is clamped down to the actual element count (4 in the fixture)
+	ASSERT(config_read_int_array(&cfg, "nums", values, &length));
+	ASSERT_EQ(length, 4U);
+	ASSERT_EQ(values[0], 10);
+	ASSERT_EQ(values[3], 40);
+	config_destroy(&cfg);
+}
+
 TEST(config_read_int_array_missing) {
 	struct config cfg = {0};
 	char path[512];
@@ -79,6 +95,7 @@ const test_entry_t g_tests_config[] = {
 	{"config_create_non_object", test_config_create_non_object},
 	{"config_read_string", test_config_read_string},
 	{"config_read_int_array", test_config_read_int_array},
+	{"config_read_int_array_clamped", test_config_read_int_array_clamped},
 	{"config_read_int_array_missing", test_config_read_int_array_missing},
 };
 

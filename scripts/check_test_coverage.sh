@@ -1,10 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Per-test coverage gate.
+#
+# Each registered test is run in isolation and must contribute at least one
+# newly-executed source line over the cumulative set of all preceding tests.
+# Tests that add nothing are reported as DROP and fail the gate.
+#
+# The expensive part (running each test and collecting its gcov line set) is
+# embarrassingly parallel, so it is fanned out across CPUs. Isolation between
+# concurrent runs is achieved with GCOV_PREFIX, which redirects each run's
+# .gcda output into a private directory (GCOV_PREFIX_STRIP=99 flattens the
+# baked-in object path down to a bare filename -- safe here because every
+# measured object has a unique basename). The order-dependent cumulative
+# bookkeeping is then done sequentially, so the KEEP/DROP decisions are
+# identical to a fully serial run.
+
 BUILD_DIR="${1:-build_test}"
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TEST_BIN="$BUILD_DIR/tests/cavex_tests"
 OBJ_DIR="$BUILD_DIR/tests/CMakeFiles/cavex_testlib.dir"
+JOBS="${COVERAGE_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 OBJECTS=(
 	"__/source/util.c.o"
 	"__/source/stack.c.o"
@@ -41,39 +57,14 @@ if [[ ! -d "$OBJ_DIR" ]]; then
 	exit 1
 fi
 
-clear_coverage() {
-	find "$BUILD_DIR" -name '*.gcda' -delete
-}
+# Absolute so that symlinks created under /tmp resolve correctly.
+OBJ_DIR="$(cd "$OBJ_DIR" && pwd)"
 
-collect_covered_lines() {
-	local obj gcov_file src line key
-
-	(
-		cd "$OBJ_DIR"
-		for obj in "${OBJECTS[@]}"; do
-			gcov -b "$obj" >/dev/null 2>&1 || true
-		done
-	)
-
-	for obj in "${OBJECTS[@]}"; do
-		gcov_file="$OBJ_DIR/$(basename "${obj%.o}").gcov"
-		if [[ ! -f "$gcov_file" ]]; then
-			continue
-		fi
-
-		src="$(grep -i 'source:' "$gcov_file" | head -1 | sed 's/.*Source://' | tr -d '[:space:]')"
-		if [[ -z "$src" ]]; then
-			src="$ROOT_DIR/source/$(basename "${obj%.o}")"
-		fi
-
-		while IFS= read -r line; do
-			if [[ "$line" =~ ^[[:space:]]*([0-9]+):[[:space:]]*([0-9]+): ]]; then
-				key="${src}:${BASH_REMATCH[2]}"
-				echo "$key"
-			fi
-		done <"$gcov_file"
-	done | sort -u
-}
+# basenames of the .gcno files we care about, e.g. "util.c.gcno"
+GCNO_NAMES=()
+for obj in "${OBJECTS[@]}"; do
+	GCNO_NAMES+=("$(basename "${obj%.o}").gcno")
+done
 
 mapfile -t TESTS < <("$TEST_BIN" --list)
 if [[ ${#TESTS[@]} -eq 0 ]]; then
@@ -81,27 +72,93 @@ if [[ ${#TESTS[@]} -eq 0 ]]; then
 	exit 1
 fi
 
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+# Shared template of gcno symlinks (flattened); workers symlink from here.
+TEMPLATE="$WORK/gcno"
+mkdir -p "$TEMPLATE"
+find "$OBJ_DIR" -name '*.gcno' -exec ln -sf {} "$TEMPLATE/" \;
+
+LINES_DIR="$WORK/lines"
+mkdir -p "$LINES_DIR"
+
+TEST_BIN_ABS="$(cd "$(dirname "$TEST_BIN")" && pwd)/$(basename "$TEST_BIN")"
+
+# Collect the executed-line set for a single test, in its own gcda sandbox.
+collect_one() {
+	local test_name="$1"
+	local d
+	d="$(mktemp -d "$WORK/run.XXXXXX")"
+
+	# private, flat working dir: gcno symlinks + (about to be written) gcda
+	ln -sf "$TEMPLATE"/*.gcno "$d/"
+
+	if ! GCOV_PREFIX="$d" GCOV_PREFIX_STRIP=99 \
+		"$TEST_BIN_ABS" --run "$test_name" >/dev/null 2>&1; then
+		echo "CRASH" >"$LINES_DIR/$test_name.crash"
+		rm -rf "$d"
+		return 0
+	fi
+
+	(
+		cd "$d"
+		for g in "${GCNO_NAMES[@]}"; do
+			gcov "$g" >/dev/null 2>&1 || true
+		done
+		for g in "${GCNO_NAMES[@]}"; do
+			gf="${g%.gcno}.gcov"
+			[[ -f "$gf" ]] || continue
+			src="$(grep -m1 'Source:' "$gf" | sed 's/.*Source://' | tr -d '[:space:]')"
+			[[ -n "$src" ]] || src="$g"
+			awk -F: -v s="$src" '
+				{ c = $1; gsub(/ /, "", c);
+				  if (c ~ /^[0-9]+$/) { l = $2; gsub(/ /, "", l); print s ":" l } }
+			' "$gf"
+		done | sort -u >"$LINES_DIR/$test_name.lines"
+	)
+
+	rm -rf "$d"
+}
+export -f collect_one
+export WORK TEMPLATE LINES_DIR TEST_BIN_ABS
+export GCNO_NAMES_STR="${GCNO_NAMES[*]}"
+
+# Re-hydrate the array inside the subshells xargs spawns.
+run_worker() {
+	# shellcheck disable=SC2206
+	GCNO_NAMES=($GCNO_NAMES_STR)
+	collect_one "$1"
+}
+export -f run_worker
+
+echo "Coverage gate: ${#TESTS[@]} tests (parallel x$JOBS)"
+
+printf '%s\n' "${TESTS[@]}" \
+	| xargs -P "$JOBS" -I {} bash -c 'run_worker "$@"' _ {}
+
+# Sequential, order-dependent cumulative bookkeeping (fast, pure bash).
 declare -A CUMULATIVE=()
 FAILED=0
 
-echo "Coverage gate: ${#TESTS[@]} tests"
-
 for test_name in "${TESTS[@]}"; do
-	clear_coverage
-	if ! "$TEST_BIN" --run "$test_name" >/dev/null; then
+	if [[ -f "$LINES_DIR/$test_name.crash" ]]; then
 		echo "FAIL: test crashed: $test_name" >&2
 		exit 1
 	fi
 
-	mapfile -t LINES < <(collect_covered_lines)
-	NEW=0
+	if [[ ! -f "$LINES_DIR/$test_name.lines" ]]; then
+		echo "FAIL: no coverage collected for $test_name" >&2
+		exit 1
+	fi
 
-	for line in "${LINES[@]}"; do
+	NEW=0
+	while IFS= read -r line; do
 		if [[ -z "${CUMULATIVE[$line]+x}" ]]; then
 			CUMULATIVE["$line"]=1
 			NEW=$((NEW + 1))
 		fi
-	done
+	done <"$LINES_DIR/$test_name.lines"
 
 	if [[ "$NEW" -eq 0 ]]; then
 		echo "DROP: $test_name (adds 0 new covered lines)"

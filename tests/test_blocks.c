@@ -27,9 +27,44 @@ TEST(block_drop_default_item) {
 	ASSERT_EQ(drop.count, 1U);
 }
 
+TEST(blocks_all_sides) {
+	int x, y, z;
+
+	// opposite for every side
+	ASSERT_EQ(blocks_side_opposite(SIDE_TOP), SIDE_BOTTOM);
+	ASSERT_EQ(blocks_side_opposite(SIDE_BOTTOM), SIDE_TOP);
+	ASSERT_EQ(blocks_side_opposite(SIDE_LEFT), SIDE_RIGHT);
+	ASSERT_EQ(blocks_side_opposite(SIDE_RIGHT), SIDE_LEFT);
+	ASSERT_EQ(blocks_side_opposite(SIDE_FRONT), SIDE_BACK);
+	ASSERT_EQ(blocks_side_opposite(SIDE_BACK), SIDE_FRONT);
+
+	// name for every side
+	ASSERT(strcmp(block_side_name(SIDE_TOP), "top") == 0);
+	ASSERT(strcmp(block_side_name(SIDE_BOTTOM), "bottom") == 0);
+	ASSERT(strcmp(block_side_name(SIDE_LEFT), "left") == 0);
+	ASSERT(strcmp(block_side_name(SIDE_RIGHT), "right") == 0);
+	ASSERT(strcmp(block_side_name(SIDE_FRONT), "front") == 0);
+	ASSERT(strcmp(block_side_name(SIDE_BACK), "back") == 0);
+
+	// offset for every side
+	blocks_side_offset(SIDE_TOP, &x, &y, &z);
+	ASSERT(x == 0 && y == 1 && z == 0);
+	blocks_side_offset(SIDE_BOTTOM, &x, &y, &z);
+	ASSERT(x == 0 && y == -1 && z == 0);
+	blocks_side_offset(SIDE_LEFT, &x, &y, &z);
+	ASSERT(x == -1 && y == 0 && z == 0);
+	blocks_side_offset(SIDE_RIGHT, &x, &y, &z);
+	ASSERT(x == 1 && y == 0 && z == 0);
+	blocks_side_offset(SIDE_BACK, &x, &y, &z);
+	ASSERT(x == 0 && y == 0 && z == 1);
+	blocks_side_offset(SIDE_FRONT, &x, &y, &z);
+	ASSERT(x == 0 && y == 0 && z == -1);
+}
+
 const test_entry_t g_tests_blocks[] = {
 	{"blocks_side_helpers", test_blocks_side_helpers},
 	{"block_drop_default_item", test_block_drop_default_item},
+	{"blocks_all_sides", test_blocks_all_sides},
 };
 
 const size_t g_tests_blocks_count
