@@ -55,6 +55,7 @@ add_executable(cavex
 				source/block/block_ice.c
 				source/block/block_jukebox.c
 				source/block/block_ladder.c
+				source/block/block_bubble_column.c
 				source/block/block_lava.c
 				source/block/block_leaves.c
 				source/block/block_log.c
