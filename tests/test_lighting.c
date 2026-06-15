@@ -51,19 +51,24 @@ TEST(lighting_heightmap_remove_solid) {
 	ASSERT_EQ(heightmap[4 + 4 * CHUNK_SIZE], 7);
 }
 
-#define LIGHT_GRID 16
+/* Tiny 2x2x2 world — strict bounds so BFS cannot escape and OOM. */
+#define LIGHT_GRID 2
 
 typedef struct {
 	uint8_t types[LIGHT_GRID][LIGHT_GRID][LIGHT_GRID];
 	uint8_t lights[LIGHT_GRID][LIGHT_GRID][LIGHT_GRID];
-	uint8_t heights[LIGHT_GRID][LIGHT_GRID];
 } light_world;
+
+static bool light_world_in_bounds(w_coord_t x, w_coord_t y, w_coord_t z) {
+	return x >= 0 && y >= 0 && z >= 0 && x < LIGHT_GRID && y < LIGHT_GRID
+		   && z < LIGHT_GRID;
+}
 
 static bool light_world_get(void* user, w_coord_t x, w_coord_t y, w_coord_t z,
 							struct block_data* blk, uint8_t* height) {
 	light_world* world = user;
 
-	if(x >= LIGHT_GRID || y >= LIGHT_GRID || z >= LIGHT_GRID)
+	if(!light_world_in_bounds(x, y, z))
 		return false;
 
 	if(blk) {
@@ -74,7 +79,7 @@ static bool light_world_get(void* user, w_coord_t x, w_coord_t y, w_coord_t z,
 	}
 
 	if(height)
-		*height = world->heights[x][z];
+		*height = 0;
 
 	return true;
 }
@@ -83,6 +88,9 @@ static void light_world_set(void* user, w_coord_t x, w_coord_t y, w_coord_t z,
 							uint8_t light) {
 	light_world* world = user;
 
+	if(!light_world_in_bounds(x, y, z))
+		return;
+
 	world->lights[x][y][z] = light;
 }
 
@@ -90,14 +98,13 @@ TEST(lighting_torch_propagates) {
 	light_world world = {0};
 
 	test_blocks_init();
-	memset(world.heights, 0, sizeof(world.heights));
-	world.types[4][4][4] = BLOCK_TORCH;
+	world.types[0][0][0] = BLOCK_TORCH;
 
-	lighting_update_at_block((struct world_modification_entry) {4, 4, 4}, true,
+	lighting_update_at_block((struct world_modification_entry) {0, 0, 0}, true,
 							 light_world_get, light_world_set, &world);
 
-	ASSERT((world.lights[4][4][4] >> 4) >= 14);
-	ASSERT((world.lights[5][4][4] >> 4) >= 13);
+	ASSERT((world.lights[0][0][0] >> 4) >= 14);
+	ASSERT((world.lights[1][0][0] >> 4) >= 13);
 }
 
 const test_entry_t g_tests_lighting[] = {
