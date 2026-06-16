@@ -9,6 +9,7 @@ Beta block array order: index = y + z*128 + x*128*16  (XZY)
 Nibble arrays (Data/SkyLight/BlockLight): even index -> low nibble.
 """
 import gzip, os, struct, sys, time, zlib
+from functools import lru_cache
 from pathlib import Path
 
 # ---------------- NBT writer ----------------
@@ -136,6 +137,7 @@ def _value_noise(wx, wz, cell):
     nx1 = n01 + (n11 - n01) * fx
     return nx0 + (nx1 - nx0) * fz
 
+@lru_cache(maxsize=None)
 def surface_y(wx, wz):
     """Deterministic surface height: rolling hills + sparser, taller peaks.
     Bounded to BASE_Y..~100 and hard-capped < 124 to stay under the 128 format cap."""
@@ -155,20 +157,42 @@ def surface_block(top):
     """Surface block for a column of the given height: snow on high ground, else grass."""
     return SNOW if top >= SNOW_LINE else GRASS
 
+TREE_PROB = 0.010          # ~1% of (non-snow) land columns sprout a tree
+TREE_CLEAR = 4             # keep this Chebyshev radius around spawn tree-free
+
+@lru_cache(maxsize=None)
+def is_tree(tx, tz):
+    """True if a tree trunk originates at this column. Deterministic + seeded, so
+    every seed grows a DIFFERENT forest layout. No trees in the spawn clearing or
+    on the bare snowy peaks."""
+    if max(abs(tx - SPAWN_X), abs(tz - SPAWN_Z)) <= TREE_CLEAR:
+        return False
+    if surface_y(tx, tz) >= SNOW_LINE:
+        return False
+    return chance(tx, tz, 0, 20, TREE_PROB)
+
 def column_blocks(wx, wz, top):
-    """world-absolute column -> list of (y, block_id) for landmark features,
-    rebased onto the per-column surface height `top` (so nothing floats/buries)."""
+    """Scattered oak-like trees -> each seed's forest is unique. A column can carry
+    trunk and/or canopy from any tree whose 5x5 footprint covers it; blocks rebase
+    onto each tree origin's OWN surface height (not this column's `top`)."""
     extra = []
-    # stone pillar landmark just off spawn (28, 24): 4 blocks tall above surface
-    if (wx, wz) == (28, 24):
-        extra += [(top + h, STONE) for h in range(1, 5)]
-    # "tree": log trunk at (20,20), leaf blob around it -- all rebased onto surface
-    if (wx, wz) == (20, 20):
-        extra += [(top + h, LOG) for h in range(1, 5)]
-    if 18 <= wx <= 22 and 18 <= wz <= 22 and (wx, wz) != (20, 20):
-        extra += [(top + h, LEAVES) for h in range(4, 7)]
-    if 19 <= wx <= 21 and 19 <= wz <= 21:
-        extra += [(top + 7, LEAVES)]
+    for dx in range(-2, 3):
+        for dz in range(-2, 3):
+            tx, tz = wx + dx, wz + dz
+            if not is_tree(tx, tz):
+                continue
+            tsurf = surface_y(tx, tz)
+            trunk_h = 4 + (h(tx, tz, 0, 21) % 2)        # 4 or 5 blocks tall
+            T = tsurf + trunk_h                          # trunk top
+            cheb = max(abs(dx), abs(dz))
+            if dx == 0 and dz == 0:
+                extra += [(tsurf + k, LOG) for k in range(1, trunk_h + 1)]
+                extra += [(T + 1, LEAVES), (T + 2, LEAVES)]            # top cap
+            else:
+                if cheb <= 2 and not (abs(dx) == 2 and abs(dz) == 2):
+                    extra += [(T - 1, LEAVES), (T, LEAVES)]            # wide skirt
+                if cheb <= 1:
+                    extra.append((T + 1, LEAVES))                      # upper ring
     return extra
 
 # ---------------- spawn (computed from the heightmap, so the player stands on ground) ----------------
@@ -204,6 +228,8 @@ def build_chunk(cx, cz):
             top = surf
             for (y, bid) in column_blocks(wx, wz, surf):
                 if 0 <= y < 128:
+                    if bid == LEAVES and blocks[base + y] != AIR:
+                        continue            # don't bury terrain under floating leaves
                     blocks[base + y] = bid
                     top = max(top, y)
             hmap[z * 16 + x] = top + 1
@@ -259,7 +285,7 @@ def write_level_dat(path, disk_size):
         t_short("Health", 20),
         t_int("Dimension", 0),
         t_list("Pos", 6, [p_double(v) for v in SPAWN]),
-        t_list("Rotation", 5, [p_float(135.0), p_float(15.0)]),
+        t_list("Rotation", 5, [p_float(float(h(SPAWN_X, SPAWN_Z, 0, 99) % 360)), p_float(15.0)]),
         t_list("Motion", 6, [p_double(0.0)] * 3),
         t_list("Inventory", 10, inv),
     ])
