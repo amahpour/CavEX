@@ -46,6 +46,7 @@ AIR, STONE, GRASS, DIRT, BEDROCK, LOG, LEAVES, SNOW = 0, 1, 2, 3, 7, 17, 18, 80
 # Beta 1.7.3 ids below are all registered + non-NULL in
 # source/block/blocks_data.h + source/block/blocks.c (verified).
 WATER, LAVA = 9, 11                      # still source variants
+SAND = 12
 GRAVEL = 13
 GOLD_ORE, IRON_ORE, COAL_ORE = 14, 15, 16
 LAPIS_ORE = 21
@@ -61,6 +62,26 @@ COL_NIBBLES = COL_BLOCKS // 2            # bytes per Data/SkyLight/BlockLight (o
 BASE_Y = 62          # baseline surface height (sea-level-ish)
 SNOW_LINE = 90       # ground at/above this y gets a snow surface
 CELL = 24            # value-noise lattice spacing in blocks
+
+# ---- caves (issue #24): connected 3D-noise tunnels carved into the stone body ----
+CAVE_CELL_XZ = 14    # horizontal lattice spacing of the 3D cave noise (blocks)
+CAVE_CELL_Y = 9      # vertical lattice spacing (squashed -> wider, flatter tunnels)
+CAVE_SHELL = 0.085   # half-width of the iso-surface band carved to AIR; a thin band
+                     # around the noise mid-value yields *connected*, winding tunnels
+                     # (a plain low threshold would give isolated blobs)
+CAVE_FLOOR = 5       # lowest y a cave may carve (keeps bedrock y0..3 + a margin solid)
+CAVE_ROOF_MARGIN = 3 # caves stop this many blocks below the surface (solid roof, no
+                     # surface breach -> spawn/terrain integrity stays guaranteed)
+
+# ---- lakes/ponds (issue #24): water bodies in the flat basin floors ----
+# surface_y() clamps any column whose relief noise dipped to/below BASE_Y up to
+# BASE_Y, so the y==BASE_Y columns are exactly the natural valley basins. We carve
+# a shallow bowl into them and fill it with still water up to WATER_LEVEL.
+WATER_LEVEL = BASE_Y         # still-water surface height for lakes/ponds (== 62)
+LAKE_MAX_DEPTH = 3           # deepest a basin bowl is dug below WATER_LEVEL
+LAKE_SPAWN_CLEAR = 6         # keep this Chebyshev radius around spawn lake-free, so a
+                            # seed whose spawn column happens to be a basin still gets
+                            # dry, solid footing (mirrors TREE_CLEAR for the spawn rule)
 
 def h(wx, wz, y, salt):
     """Deterministic pure-stdlib hash -> 32-bit unsigned, seeded from SEED.
@@ -149,6 +170,72 @@ def _value_noise(wx, wz, cell):
     return nx0 + (nx1 - nx0) * fz
 
 @lru_cache(maxsize=None)
+def _hash01_3(ix, iy, iz, salt):
+    """3D lattice-point hash -> float in [0,1). Pure-integer, seeded, deterministic.
+    `salt` lets independent 3D noise fields share the lattice hashing helper.
+    Cached: each lattice point is shared by CAVE_CELL_XZ^2 * CAVE_CELL_Y cells, so
+    memoizing here collapses tens of millions of cell evals onto a few thousand
+    distinct lattice points -> generation stays close to the pre-cave time."""
+    h = (ix * 374761393 + iy * 1610612741 + iz * 668265263
+         + salt * 2246822519 + SEED * 2147483647) & 0xFFFFFFFF
+    h = (h ^ (h >> 13)) * 1274126177 & 0xFFFFFFFF
+    h ^= h >> 16
+    return (h & 0xFFFFFF) / float(0x1000000)
+
+def _value_noise3(wx, wy, wz, cell_xz, cell_y, salt=0):
+    """Trilinearly-interpolated, smoothstepped 3D value noise in [0,1).
+    Vertical lattice spacing is independent so caves can be squashed (wider than
+    they are tall). Pure-integer lattice hash -> fully deterministic from SEED."""
+    gx, gy, gz = wx / float(cell_xz), wy / float(cell_y), wz / float(cell_xz)
+    ix = int(gx) - (1 if gx < 0 else 0)
+    iy = int(gy) - (1 if gy < 0 else 0)
+    iz = int(gz) - (1 if gz < 0 else 0)
+    fx, fy, fz = _smooth(gx - ix), _smooth(gy - iy), _smooth(gz - iz)
+    hh = _hash01_3
+    # 8 corner lattice values, interpolate along x, then y, then z
+    n000, n100 = hh(ix, iy, iz, salt),     hh(ix + 1, iy, iz, salt)
+    n010, n110 = hh(ix, iy + 1, iz, salt), hh(ix + 1, iy + 1, iz, salt)
+    n001, n101 = hh(ix, iy, iz + 1, salt), hh(ix + 1, iy, iz + 1, salt)
+    n011, n111 = hh(ix, iy + 1, iz + 1, salt), hh(ix + 1, iy + 1, iz + 1, salt)
+    c00 = n000 + (n100 - n000) * fx
+    c10 = n010 + (n110 - n010) * fx
+    c01 = n001 + (n101 - n001) * fx
+    c11 = n011 + (n111 - n011) * fx
+    c0 = c00 + (c10 - c00) * fy
+    c1 = c01 + (c11 - c01) * fy
+    return c0 + (c1 - c0) * fz
+
+def is_cave(wx, wz, y, surf):
+    """True if (wx, y, wz) should be carved to AIR (a cave cell).
+
+    Caves are the thin iso-surface band |noise - 0.5| < CAVE_SHELL of a squashed
+    3D value-noise field -> long, branching, *connected* tunnels (Beta-ish). The
+    band is only evaluated in CAVE_FLOOR .. (surf - CAVE_ROOF_MARGIN), so bedrock
+    (y0..3) and a solid surface roof are always preserved (no surface breach)."""
+    if y < CAVE_FLOOR or y > surf - CAVE_ROOF_MARGIN:
+        return False
+    n = _value_noise3(wx, y, wz, CAVE_CELL_XZ, CAVE_CELL_Y, salt=101)
+    return abs(n - 0.5) < CAVE_SHELL
+
+@lru_cache(maxsize=None)
+def lake_depth(wx, wz):
+    """Bowl depth (blocks dug below WATER_LEVEL) for a basin column, else 0.
+
+    Only the flat valley basins (surface clamped to BASE_Y) become lakes. Depth
+    is a deterministic 1..LAKE_MAX_DEPTH from the relief noise so the bowl has a
+    natural, varied floor. The spawn clearing is force-excluded so that even a
+    seed whose spawn column is itself a basin keeps dry, solid footing — this is
+    what keeps the spawn-clear / eye-height rule intact for every seed."""
+    if max(abs(wx - SPAWN_X), abs(wz - SPAWN_Z)) <= LAKE_SPAWN_CLEAR:
+        return 0
+    if surface_y(wx, wz) > WATER_LEVEL:
+        return 0
+    # deeper toward basin interiors: drive depth from the (low) relief noise value
+    t = 1.0 - _value_noise(wx, wz, CELL)        # 0 at basin rim, larger inside
+    d = 1 + int(t * LAKE_MAX_DEPTH)
+    return max(1, min(LAKE_MAX_DEPTH, d))
+
+@lru_cache(maxsize=None)
 def surface_y(wx, wz):
     """Deterministic surface height: rolling hills + sparser, taller peaks.
     Bounded to BASE_Y..~100 and hard-capped at 122 (terrain-shape choice; well
@@ -181,6 +268,8 @@ def is_tree(tx, tz):
     if max(abs(tx - SPAWN_X), abs(tz - SPAWN_Z)) <= TREE_CLEAR:
         return False
     if surface_y(tx, tz) >= SNOW_LINE:
+        return False
+    if lake_depth(tx, tz):          # no trees standing in lakes/ponds
         return False
     return chance(tx, tz, 0, 20, TREE_PROB)
 
@@ -233,11 +322,34 @@ def build_chunk(cx, cz):
             wx, wz = cx * 16 + x, cz * 16 + z
             base = (x * 16 + z) * WORLD_HEIGHT   # x*H*16 + z*H
             surf = surface_y(wx, wz)        # per-column surface height (relief)
+            depth = lake_depth(wx, wz)      # >0 only for flat basin (lake) columns
             # Layered sub-surface: bedrock floor, stone body, ores + fluid pockets
             # (deterministic from SEED via strata_block()), up to the surface.
             for y in range(0, surf - 4):        blocks[base + y] = strata_block(wx, wz, y)
             for y in range(surf - 4, surf):     blocks[base + y] = DIRT
             blocks[base + surf] = surface_block(surf)   # snow on high ground, else grass
+
+            # Carve caves: thin 3D-noise iso-surface -> connected tunnels. Stops
+            # short of the surface (solid roof) and the bedrock floor; in lake
+            # columns it also stays a block below the basin bowl so water can't
+            # drain into the cave system.
+            cave_top = surf - CAVE_ROOF_MARGIN
+            if depth:
+                cave_top = min(cave_top, WATER_LEVEL - depth - 1)
+            for y in range(CAVE_FLOOR, cave_top + 1):
+                if is_cave(wx, wz, y, surf):
+                    blocks[base + y] = AIR
+
+            # Lakes/ponds: dig a shallow bowl into the basin floor and fill it
+            # with still water up to WATER_LEVEL; sandy bowl floor underneath.
+            water_top = -1
+            if depth:
+                floor_y = WATER_LEVEL - depth
+                blocks[base + floor_y] = SAND
+                for y in range(floor_y + 1, WATER_LEVEL + 1):
+                    blocks[base + y] = WATER
+                water_top = WATER_LEVEL
+
             top = surf
             for (y, bid) in column_blocks(wx, wz, surf):
                 if 0 <= y < WORLD_HEIGHT:
@@ -246,8 +358,11 @@ def build_chunk(cx, cz):
                     blocks[base + y] = bid
                     top = max(top, y)
             hmap[z * 16 + x] = top + 1
-            # full skylight above (and at) the surface
-            for y in range(top + 1, WORLD_HEIGHT):
+            # Skylight: for land, the air above the surface block is lit. For a
+            # lake the topmost water block is open to the sky, so light it too;
+            # the water below it stays dark (SkyLight 0), reading as deeper water.
+            sky_from = water_top if water_top >= 0 else top + 1
+            for y in range(sky_from, WORLD_HEIGHT):
                 idx = base + y
                 if idx & 1: skyl[idx >> 1] |= 0xF0
                 else:       skyl[idx >> 1] |= 0x0F
@@ -314,6 +429,68 @@ def write_level_dat(path, disk_size):
     ])
     path.write_bytes(gzip.compress(t_compound("", [data])))
 
+def _largest_connected(cols):
+    """Largest 4-connected component size in a set of (x, z) cells (self-check)."""
+    from collections import deque
+    cols = set(cols)
+    seen = set()
+    best = 0
+    for start in cols:
+        if start in seen:
+            continue
+        q = deque([start]); seen.add(start); size = 0
+        while q:
+            x, z = q.popleft(); size += 1
+            for nx, nz in ((x+1, z), (x-1, z), (x, z+1), (x, z-1)):
+                n = (nx, nz)
+                if n in cols and n not in seen:
+                    seen.add(n); q.append(n)
+        if size > best:
+            best = size
+    return best
+
+def _largest_cave_volume(read_chunk):
+    """Largest 6-connected AIR volume below the surface roof across sample chunks.
+
+    Proves caves are *connected* tunnels (not scattered single-cell pockets)
+    without the cost of flooding the whole region. Sampling several spread-out
+    chunks (rather than one) makes the connectivity gate robust to any single
+    chunk happening to hold only short stubs for a given seed. The per-chunk
+    flood is chunk-local, so it UNDER-counts tunnels that exit the chunk — i.e.
+    it can only under-report, never over-report, connectivity (safe direction)."""
+    from collections import deque
+    best = 0
+    for scx, scz in ((2, 2), (10, 6), (20, 24), (28, 14)):
+        ch = read_chunk(scx, scz)
+        bi = ch.find(b"Blocks") + len("Blocks") + 4
+        blocks = ch[bi:bi + 32768]
+        air = set()
+        for x in range(16):
+            for z in range(16):
+                col = (x * 16 + z) * 128
+                top_y = -1
+                for y in range(127, -1, -1):
+                    if blocks[col + y] != AIR:
+                        top_y = y
+                        break
+                for y in range(CAVE_FLOOR, top_y):
+                    if blocks[col + y] == AIR:
+                        air.add((x, y, z))
+        seen = set()
+        for start in air:
+            if start in seen:
+                continue
+            q = deque([start]); seen.add(start); size = 0
+            while q:
+                x, y, z = q.popleft(); size += 1
+                for nx, ny, nz in ((x+1,y,z),(x-1,y,z),(x,y+1,z),(x,y-1,z),(x,y,z+1),(x,y,z-1)):
+                    n = (nx, ny, nz)
+                    if n in air and n not in seen:
+                        seen.add(n); q.append(n)
+            if size > best:
+                best = size
+    return best
+
 def main():
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "out") / "world"
     (out / "region").mkdir(parents=True, exist_ok=True)
@@ -343,14 +520,19 @@ def main():
         return 0, AIR
 
     # spawn chunk parses with the expected NBT skeleton
-    spawn_chunk = read_chunk(24 // 16, 24 // 16)
+    spawn_chunk = read_chunk(SPAWN_X // 16, SPAWN_Z // 16)
+    spawn_xin, spawn_zin = SPAWN_X % 16, SPAWN_Z % 16
     assert b"Blocks" in spawn_chunk and b"SkyLight" in spawn_chunk and b"xPos" in spawn_chunk
 
-    # Scan the whole region once: collect surface heights, count snow caps, and
-    # track the absolute top non-air block (landmark stacks included).
+    # Scan the whole region once: collect surface heights, count snow caps, track
+    # the absolute top non-air block (landmark stacks included), and tally the new
+    # caves (underground air) + lake water bodies.
     heights = set()      # distinct grass/snow surface heights (relief)
     snow_cols = 0        # columns whose surface block is snow
     region_max = 0       # highest non-air block anywhere (must stay < WORLD_HEIGHT)
+    cave_air = 0         # AIR cells trapped below the surface roof (caves)
+    water_cells = 0      # WATER cells anywhere (lakes/ponds)
+    lake_cols = set()    # (wx, wz) columns whose top is still water (lake surface)
     for cz in range(32):
         for cx in range(32):
             ch = read_chunk(cx, cz)
@@ -358,20 +540,34 @@ def main():
             for x_in in range(16):
                 for z_in in range(16):
                     col = bi + (x_in * 16 + z_in) * WORLD_HEIGHT
-                    surf_seen = False
+                    # walk down from the top: first non-air is the surface (land
+                    # block, or water for a lake); everything AIR strictly below
+                    # the highest solid/water block is cave space.
+                    top_y = -1
                     for y in range(WORLD_HEIGHT - 1, -1, -1):
                         b = ch[col + y]
                         if b == AIR:
+                            # count only air that is unambiguously subsurface: below
+                            # the column's top AND at/under BASE_Y, so foliage gaps
+                            # between tree canopy and ground are never miscounted.
+                            if top_y >= 0 and CAVE_FLOOR <= y <= BASE_Y:
+                                cave_air += 1   # air under the roof -> a cave cell
                             continue
-                        if y > region_max:
-                            region_max = y
-                        # surface = topmost grass/snow block (ignore landmark blocks above it)
-                        if not surf_seen and b in (GRASS, SNOW):
-                            heights.add(y)
-                            if b == SNOW:
-                                snow_cols += 1
-                            surf_seen = True
-                            break
+                        if top_y < 0:
+                            top_y = y
+                            if y > region_max:
+                                region_max = y
+                            if b == WATER:
+                                lake_cols.add((cx * 16 + x_in, cz * 16 + z_in))
+                            elif b in (GRASS, SNOW):
+                                heights.add(y)
+                                if b == SNOW:
+                                    snow_cols += 1
+                        # count only lake-band water (the bowl is dug at most
+                        # LAKE_MAX_DEPTH below WATER_LEVEL); this excludes the deep
+                        # strata fluid pockets so the tally reflects lakes alone.
+                        if b == WATER and y >= WATER_LEVEL - LAKE_MAX_DEPTH:
+                            water_cells += 1
 
     # (1) terrain is non-flat: a real spread of surface heights
     assert len(heights) >= 5, f"terrain too flat: only {len(heights)} distinct heights"
@@ -383,13 +579,26 @@ def main():
     assert region_max < WORLD_HEIGHT, \
         f"a column exceeds the {WORLD_HEIGHT} cap (max y {region_max})"
 
+    # (6) caves: a meaningful amount of connected underground air was carved.
+    assert cave_air >= 10000, f"too little cave air carved ({cave_air} cells)"
+    largest_cave = _largest_cave_volume(read_chunk)
+    assert largest_cave >= 200, \
+        f"caves not connected (largest single cave volume {largest_cave} cells)"
+
+    # (7) lakes/ponds: at least one multi-block surface water body. Flood-fill the
+    # lake-surface columns; require one horizontally-connected pool of >= 8 cells.
+    assert water_cells >= 1, "no water cells found in region"
+    biggest_lake = _largest_connected(lake_cols)
+    assert biggest_lake >= 8, \
+        f"no multi-block water body (largest connected lake surface {biggest_lake} cells)"
+
     # (4) spawn is safe: solid surface, 2 air blocks of head clearance, and the
     # player's FEET (Pos.y - EYE_HEIGHT) land just above the surface block top.
-    sy, sb = column_top(spawn_chunk, 24 % 16, 24 % 16)
+    sy, sb = column_top(spawn_chunk, spawn_xin, spawn_zin)
     assert sb in (GRASS, SNOW, STONE, DIRT), f"spawn surface not solid ground (block {sb})"
     assert sy == SPAWN_SURFACE, f"spawn surface y {sy} != computed {SPAWN_SURFACE}"
     bi = spawn_chunk.find(b"Blocks") + len("Blocks") + 4
-    col = ((24 % 16) * 16 + (24 % 16)) * WORLD_HEIGHT
+    col = (spawn_xin * 16 + spawn_zin) * WORLD_HEIGHT
     assert spawn_chunk[bi + col + sy + 1] == AIR and spawn_chunk[bi + col + sy + 2] == AIR, \
         "spawn column lacks 2 blocks of head clearance"
     assert SPAWN_Y == sy + 1, f"SpawnY {SPAWN_Y} not just above surface {sy}"
@@ -400,7 +609,7 @@ def main():
     # (5) strata present: bedrock floor + ores + fluid pockets (from strata_block)
     sbi = spawn_chunk.find(b"Blocks") + len("Blocks") + 4
     spawn_blocks = spawn_chunk[sbi:sbi + COL_BLOCKS]
-    assert spawn_blocks[((24 % 16) * 16 + (24 % 16)) * WORLD_HEIGHT + 0] == BEDROCK, "bedrock missing at y=0"
+    assert spawn_blocks[(spawn_xin * 16 + spawn_zin) * WORLD_HEIGHT + 0] == BEDROCK, "bedrock missing at y=0"
     ore_ids = {COAL_ORE, IRON_ORE, GOLD_ORE, REDSTONE_ORE, LAPIS_ORE, DIAMOND_ORE}
     ores_found = ore_ids & set(spawn_blocks)
     lava_low = any(spawn_blocks[c * WORLD_HEIGHT + y] == LAVA
@@ -414,7 +623,10 @@ def main():
     print(f"self-check OK: relief {min(heights)}..{max(heights)} "
           f"({len(heights)} heights), {snow_cols} snow column(s) >= y{SNOW_LINE}, "
           f"region max y {region_max} < {WORLD_HEIGHT}, spawn solid at y{sy} (SpawnY {SPAWN_Y}), "
-          f"strata ores {sorted(ores_found)} + lava/water, 'Claude World' preserved")
+          f"strata ores {sorted(ores_found)} + lava/water, "
+          f"caves {cave_air} air cells (largest vol {largest_cave}), "
+          f"lakes {water_cells} water cells (largest pool {biggest_lake}), "
+          f"'Claude World' preserved")
 
 if __name__ == "__main__":
     main()
