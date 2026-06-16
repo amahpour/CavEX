@@ -41,6 +41,7 @@ enum client_rpc_type {
 	CRPC_ENTITY_MOVE,
 	CRPC_OPEN_WINDOW,
 	CRPC_PARTICLE_BURST,
+	CRPC_GAMEMODE,
 };
 
 struct client_rpc {
@@ -106,6 +107,10 @@ struct client_rpc {
 			uint16_t count;
 			uint8_t tex;
 		} particle_burst;
+		struct {
+			// authoritative creative flag, mirrored to the client local player
+			bool creative;
+		} gamemode;
 	} payload;
 };
 

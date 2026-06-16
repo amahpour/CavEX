@@ -39,10 +39,15 @@ enum tool_tier {
 	TOOL_TIER_MAX,
 };
 
+#include <stdbool.h>
+
 struct block;
 struct item;
 
 int tool_tier_divider(enum tool_tier tier);
-int tool_dig_delay_ms(struct block* type, struct item* it);
+// Returns the dig time in ms for `type` with `it`, or -1 for unbreakable
+// blocks. In creative mode every breakable block is instant (returns 0); the
+// unbreakable (-1) case is preserved so bedrock etc. still cannot be mined.
+int tool_dig_delay_ms(struct block* type, struct item* it, bool creative);
 
 #endif

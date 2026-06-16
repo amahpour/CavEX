@@ -33,6 +33,7 @@ enum server_rpc_type {
 	SRPC_BLOCK_DIG,
 	SRPC_WINDOW_CLICK,
 	SRPC_WINDOW_CLOSE,
+	SRPC_SET_GAMEMODE,
 };
 
 struct server_rpc {
@@ -66,6 +67,12 @@ struct server_rpc {
 		struct {
 			uint8_t window;
 		} window_close;
+		struct {
+			// true  -> toggle the server's creative flag (echoed back via
+			//          CRPC_GAMEMODE)
+			// false -> just request the current state be (re)sent
+			bool toggle;
+		} set_gamemode;
 	} payload;
 };
 

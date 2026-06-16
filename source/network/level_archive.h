@@ -77,6 +77,13 @@ struct level_archive_tag {
 	(struct level_archive_tag) {                                               \
 		".Data.Player.Dimension", TAG_INT                                      \
 	}
+// Beta 1.7.3 stores the per-player game mode as a byte under Player.gameMode
+// (0 = survival, 1 = creative). Absent on legacy/survival saves; readers must
+// treat a missing tag as survival (see SRPC_LOAD_WORLD).
+#define LEVEL_PLAYER_GAMEMODE                                                  \
+	(struct level_archive_tag) {                                               \
+		".Data.Player.gameMode", TAG_BYTE                                      \
+	}
 
 #define LEVEL_PLAYER_INVENTORY                                                 \
 	(struct level_archive_tag) {                                               \

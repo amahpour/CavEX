@@ -334,6 +334,13 @@ void clin_process(struct client_rpc* call) {
 							   call->payload.particle_burst.tex);
 			}
 		} break;
+		case CRPC_GAMEMODE:
+			// Mirror the server's authoritative creative flag onto the client
+			// local player (HUD + dig-timer feel only).
+			if(gstate.local_player)
+				gstate.local_player->data.local_player.creative
+					= call->payload.gamemode.creative;
+			break;
 	}
 }
 

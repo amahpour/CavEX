@@ -17,6 +17,10 @@ TEST(demo_names_and_empty) {
 	ASSERT_EQ(demo_button_from_name("JUMP"), IB_JUMP);
 	ASSERT_EQ(demo_button_from_name("MINE"), IB_ACTION1);	// alias
 	ASSERT_EQ(demo_button_from_name("PLACE"), IB_ACTION2);	// alias
+	// Creative-toggle token + alias (issue #21): lets a demo script drive the
+	// IB_TOGGLE_CREATIVE keybind so creative mode can be demonstrated by the rig.
+	ASSERT_EQ(demo_button_from_name("TOGGLE_CREATIVE"), IB_TOGGLE_CREATIVE);
+	ASSERT_EQ(demo_button_from_name("CREATIVE"), IB_TOGGLE_CREATIVE); // alias
 	ASSERT_EQ(demo_button_from_name("NOPE"), -1);
 	ASSERT_EQ(demo_button_from_name(NULL), -1);
 

@@ -59,6 +59,9 @@ struct entity {
 			int jump_ticks;
 			bool capture_input;
 			bool flying;
+			// Client mirror of the server's creative flag (HUD + dig-timer
+			// gate only; the server stays authoritative). Set by CRPC_GAMEMODE.
+			bool creative;
 			int jump_tap_window;
 			bool jump_held_prev;
 		} local_player;

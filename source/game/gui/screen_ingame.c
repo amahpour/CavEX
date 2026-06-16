@@ -172,6 +172,10 @@ static void screen_ingame_update(struct screen* s, float dt) {
 		}
 	}
 
+	// Client mirror of the creative flag (drives instant-break feel below).
+	bool creative = gstate.local_player
+		&& gstate.local_player->data.local_player.creative;
+
 	if(gstate.digging.active) {
 		struct block_data blk
 			= world_get_block(&gstate.world, gstate.digging.x, gstate.digging.y,
@@ -180,7 +184,7 @@ static void screen_ingame_update(struct screen* s, float dt) {
 		inventory_get_hotbar_item(
 			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), &it);
 		int delay = blocks[blk.type] ?
-			tool_dig_delay_ms(blocks[blk.type], item_get(&it)) :
+			tool_dig_delay_ms(blocks[blk.type], item_get(&it), creative) :
 			0;
 
 		if(!gstate.camera_hit.hit || gstate.digging.x != gstate.camera_hit.x
@@ -199,6 +203,35 @@ static void screen_ingame_update(struct screen* s, float dt) {
 				.payload.block_dig.side = gstate.camera_hit.side,
 				.payload.block_dig.finished = false,
 			});
+		}
+
+		// Creative instant break: finish the dig immediately for breakable
+		// blocks. Re-read the block at the (possibly just-updated) aimed cell so
+		// the breakability check matches the cell we actually break — `delay`
+		// above may have been computed for the previous cell during a crosshair
+		// sweep. tool_dig_delay_ms returns -1 for unbreakable blocks (e.g.
+		// bedrock), which must NOT break even in creative; 0 means instant.
+		if(creative && gstate.camera_hit.hit) {
+			struct block_data aimed
+				= world_get_block(&gstate.world, gstate.digging.x,
+								  gstate.digging.y, gstate.digging.z);
+			int aimed_delay = blocks[aimed.type] ?
+				tool_dig_delay_ms(blocks[aimed.type], item_get(&it), true) :
+				-1;
+
+			if(aimed_delay == 0) {
+				svin_rpc_send(&(struct server_rpc) {
+					.type = SRPC_BLOCK_DIG,
+					.payload.block_dig.x = gstate.digging.x,
+					.payload.block_dig.y = gstate.digging.y,
+					.payload.block_dig.z = gstate.digging.z,
+					.payload.block_dig.side = gstate.camera_hit.side,
+					.payload.block_dig.finished = true,
+				});
+
+				gstate.digging.cooldown = time_get();
+				gstate.digging.active = false;
+			}
 		}
 
 		if(delay > 0
@@ -328,6 +361,14 @@ static void screen_ingame_update(struct screen* s, float dt) {
 		});
 	}
 
+	// Creative toggle: ask the (authoritative) server to flip its flag; it
+	// echoes the new state back via CRPC_GAMEMODE which updates the HUD/feel.
+	if(input_pressed(IB_TOGGLE_CREATIVE))
+		svin_rpc_send(&(struct server_rpc) {
+			.type = SRPC_SET_GAMEMODE,
+			.payload.set_gamemode.toggle = true,
+		});
+
 	if(input_pressed(IB_INVENTORY))
 		screen_set(&screen_inventory);
 
@@ -348,6 +389,11 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 		gutil_text(4, 4 + 17 * 4,
 				   "FLYING  (hold Jump = up, Sneak = down, double-tap Jump = off)",
 				   16, true);
+
+	// Creative-mode indicator: shown only while the (server-authoritative)
+	// creative flag is mirrored on. Survival worlds never display it.
+	if(gstate.local_player && gstate.local_player->data.local_player.creative)
+		gutil_text(4, 4 + 17 * 6, "CREATIVE", 16, true);
 
 #ifdef PLATFORM_WII
 	{
@@ -373,8 +419,10 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 		struct item_data dit;
 		inventory_get_hotbar_item(
 			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), &dit);
+		bool dcreative = gstate.local_player
+			&& gstate.local_player->data.local_player.creative;
 		int ddelay = blocks[dblk.type] ?
-			tool_dig_delay_ms(blocks[dblk.type], item_get(&dit)) :
+			tool_dig_delay_ms(blocks[dblk.type], item_get(&dit), dcreative) :
 			0;
 		sprintf(str, "dig a=%i e=%i d=%i cd=%i hit=%i A=%i",
 				gstate.digging.active,
