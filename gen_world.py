@@ -8,7 +8,7 @@ Pure stdlib. Produces:
 Beta block array order: index = y + z*128 + x*128*16  (XZY)
 Nibble arrays (Data/SkyLight/BlockLight): even index -> low nibble.
 """
-import gzip, struct, sys, time, zlib
+import gzip, os, struct, sys, time, zlib
 from pathlib import Path
 
 # ---------------- NBT writer ----------------
@@ -44,7 +44,8 @@ GOLD_ORE, IRON_ORE, COAL_ORE = 14, 15, 16
 LAPIS_ORE = 21
 DIAMOND_ORE = 56
 REDSTONE_ORE = 73
-SEED = 42            # matches level.dat RandomSeed; terrain + strata derive from it
+SEED = int(os.environ.get("CAVEX_SEED", "42"))   # CAVEX_SEED overrides; terrain + strata + RandomSeed all derive from it
+LEVEL_NAME = os.environ.get("CAVEX_LEVEL_NAME", "Claude World")  # CAVEX_LEVEL_NAME overrides the world-list name
 BASE_Y = 62          # baseline surface height (sea-level-ish)
 SNOW_LINE = 90       # ground at/above this y gets a snow surface (128-cap world)
 CELL = 24            # value-noise lattice spacing in blocks
@@ -244,6 +245,8 @@ def write_level_dat(path, disk_size):
         p_compound([t_short("id", 5),  t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 1)]),
         p_compound([t_short("id", 50), t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 2)]),
         p_compound([t_short("id", 1),  t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 3)]),
+        p_compound([t_short("id", 97), t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 4)]),  # Candle (#55) — glowing block
+        p_compound([t_short("id", 98), t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 5)]),  # Bubble column (#56) — ride upward
     ]
     player = t_compound("Player", [
         t_short("Health", 20),
@@ -254,11 +257,11 @@ def write_level_dat(path, disk_size):
         t_list("Inventory", 10, inv),
     ])
     data = t_compound("Data", [
-        t_string("LevelName", "Claude World"),
+        t_string("LevelName", LEVEL_NAME),
         t_long("Time", 0),
         t_long("LastPlayed", int(time.time() * 1000)),
         t_long("SizeOnDisk", disk_size),
-        t_long("RandomSeed", 42),
+        t_long("RandomSeed", SEED),
         t_int("SpawnX", SPAWN_X), t_int("SpawnY", SPAWN_Y), t_int("SpawnZ", SPAWN_Z),
         t_int("version", 19132),
         player,
@@ -274,8 +277,8 @@ def main():
 
     # -------- self-check: re-parse what we wrote --------
     lvl = gzip.decompress((out / "level.dat").read_bytes())
-    # 'Claude World' name preserved (HARD constraint: existing saves keep loading)
-    assert b"LevelName" in lvl and b"Claude World" in lvl and b"Inventory" in lvl
+    # LevelName + inventory round-trip (the configured name, default 'Claude World')
+    assert b"LevelName" in lvl and LEVEL_NAME.encode() in lvl and b"Inventory" in lvl
     reg = (out / "region" / "r.0.0.mcr").read_bytes()
 
     def read_chunk(cx, cz):
