@@ -1,6 +1,6 @@
 // Unit tests for the pure double-tap detector behind creative flight (#22).
 // The detector is called once per game tick with the just-pressed edge of the
-// jump button; it returns true on the second press inside the ~5-tick window
+// jump button; it returns true on the second press inside the JUMP_TAP_WINDOW-tick window
 // (a toggle should fire) and false otherwise.
 
 #include "entity/entity.h"
@@ -21,7 +21,7 @@ TEST(double_tap_second_press_toggles) {
 TEST(double_tap_expires_no_toggle) {
 	int window = 0;
 	ASSERT_EQ(detect_double_tap(true, &window), false); // first tap, window open
-	for(int k = 0; k < 5; k++)
+	for(int k = 0; k < JUMP_TAP_WINDOW; k++)
 		ASSERT_EQ(detect_double_tap(false, &window), false); // idle ticks decay it
 	ASSERT_EQ(window, 0);                               // window has expired
 	ASSERT_EQ(detect_double_tap(true, &window), false); // fresh tap, no toggle

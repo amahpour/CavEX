@@ -27,9 +27,8 @@
 // the player rises steadily without being launched through the ceiling.
 #define BUBBLE_COLUMN_PUSH 0.25F
 
-// Double-tap window in ticks. The game ticks at 20 Hz (50 ms/tick, main.c:237),
-// so 5 ticks ~= 250 ms.
-#define JUMP_TAP_WINDOW 5
+// JUMP_TAP_WINDOW (the double-tap window, in 20 Hz ticks) is defined in entity.h
+// so the unit test and the implementation share the exact value.
 
 // Vertical speed (blocks/tick) used while flying.
 #define FLY_SPEED 0.4F
@@ -127,13 +126,22 @@ static bool entity_tick(struct entity* e) {
 		jumping = input_held(IB_JUMP);
 		sneaking = input_held(IB_SNEAK);
 
+		// Rising edge of jump, sampled at the 20 Hz tick. We must NOT call
+		// input_pressed(IB_JUMP) here: input_held(IB_JUMP) above already calls
+		// input_native_key_status(), which on PC consumes the press edge as a
+		// side effect (sets input_key_held), so input_pressed() would read
+		// false on this tick and flight could never toggle. Derive the edge
+		// from the jump level we already sampled instead.
+		bool jump_edge = jumping && !e->data.local_player.jump_held_prev;
+		e->data.local_player.jump_held_prev = jumping;
+
 		// double-tap jump toggles creative flight (local-only, not persisted)
-		if(detect_double_tap(input_pressed(IB_JUMP),
-							  &e->data.local_player.jump_tap_window))
+		if(detect_double_tap(jump_edge, &e->data.local_player.jump_tap_window))
 			e->data.local_player.flying = !e->data.local_player.flying;
 	} else {
 		// keep the window from going stale while input is not captured
 		e->data.local_player.jump_tap_window = 0;
+		e->data.local_player.jump_held_prev = false;
 	}
 
 	bool flying = e->data.local_player.flying;
@@ -305,4 +313,5 @@ void entity_local_player(uint32_t id, struct entity* e, struct world* w) {
 	e->data.local_player.jump_ticks = 0;
 	e->data.local_player.flying = false;
 	e->data.local_player.jump_tap_window = 0;
+	e->data.local_player.jump_held_prev = false;
 }

@@ -8,7 +8,7 @@ Pure stdlib. Produces:
 Beta block array order: index = y + z*128 + x*128*16  (XZY)
 Nibble arrays (Data/SkyLight/BlockLight): even index -> low nibble.
 """
-import gzip, struct, sys, time, zlib
+import gzip, os, struct, sys, time, zlib
 from pathlib import Path
 
 # ---------------- NBT writer ----------------
@@ -44,7 +44,8 @@ GOLD_ORE, IRON_ORE, COAL_ORE = 14, 15, 16
 LAPIS_ORE = 21
 DIAMOND_ORE = 56
 REDSTONE_ORE = 73
-SEED = 42            # matches level.dat RandomSeed; terrain + strata derive from it
+SEED = int(os.environ.get("CAVEX_SEED", "42"))   # CAVEX_SEED overrides; terrain + strata + RandomSeed all derive from it
+LEVEL_NAME = os.environ.get("CAVEX_LEVEL_NAME", "Claude World")  # CAVEX_LEVEL_NAME overrides the world-list name
 BASE_Y = 62          # baseline surface height (sea-level-ish)
 SNOW_LINE = 90       # ground at/above this y gets a snow surface (128-cap world)
 CELL = 24            # value-noise lattice spacing in blocks
@@ -171,10 +172,17 @@ def column_blocks(wx, wz, top):
     return extra
 
 # ---------------- spawn (computed from the heightmap, so the player stands on ground) ----------------
+# CavEX stores Player.Pos.y as the EYE position; the engine derives the feet as
+# Pos.y - EYE_HEIGHT (source/entity/entity_local_player.c). Pos.y must therefore
+# clear the surface block top by EYE_HEIGHT, or the player spawns embedded in the
+# ground and is wedged in place (has to dig out). Minecraft's feet convention
+# (SPAWN_SURFACE + 1.5) does exactly that and was the stuck-at-spawn bug.
+EYE_HEIGHT = 1.62                                     # must match entity_local_player.c
 SPAWN_X, SPAWN_Z = 24, 24
 SPAWN_SURFACE = surface_y(SPAWN_X, SPAWN_Z)          # solid surface block y at spawn column
-SPAWN_Y = SPAWN_SURFACE + 1                          # integer feet-on-ground for SpawnX/Y/Z
-SPAWN = (SPAWN_X + 0.5, SPAWN_SURFACE + 1.5, SPAWN_Z + 0.5)  # Player.Pos, ~1.5 above the surface
+SPAWN_FEET = SPAWN_SURFACE + 1                        # top face of the surface block (feet rest here)
+SPAWN_Y = SPAWN_FEET                                  # integer respawn cell for SpawnX/Y/Z
+SPAWN = (SPAWN_X + 0.5, SPAWN_FEET + 0.38 + EYE_HEIGHT, SPAWN_Z + 0.5)  # eye pos; feet ~0.38 above ground
 
 def build_chunk(cx, cz):
     blocks = bytearray(32768)
@@ -244,6 +252,8 @@ def write_level_dat(path, disk_size):
         p_compound([t_short("id", 5),  t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 1)]),
         p_compound([t_short("id", 50), t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 2)]),
         p_compound([t_short("id", 1),  t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 3)]),
+        p_compound([t_short("id", 97), t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 4)]),  # Candle (#55) — glowing block
+        p_compound([t_short("id", 98), t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 5)]),  # Bubble column (#56) — ride upward
     ]
     player = t_compound("Player", [
         t_short("Health", 20),
@@ -254,11 +264,11 @@ def write_level_dat(path, disk_size):
         t_list("Inventory", 10, inv),
     ])
     data = t_compound("Data", [
-        t_string("LevelName", "Claude World"),
+        t_string("LevelName", LEVEL_NAME),
         t_long("Time", 0),
         t_long("LastPlayed", int(time.time() * 1000)),
         t_long("SizeOnDisk", disk_size),
-        t_long("RandomSeed", 42),
+        t_long("RandomSeed", SEED),
         t_int("SpawnX", SPAWN_X), t_int("SpawnY", SPAWN_Y), t_int("SpawnZ", SPAWN_Z),
         t_int("version", 19132),
         player,
@@ -274,8 +284,8 @@ def main():
 
     # -------- self-check: re-parse what we wrote --------
     lvl = gzip.decompress((out / "level.dat").read_bytes())
-    # 'Claude World' name preserved (HARD constraint: existing saves keep loading)
-    assert b"LevelName" in lvl and b"Claude World" in lvl and b"Inventory" in lvl
+    # LevelName + inventory round-trip (the configured name, default 'Claude World')
+    assert b"LevelName" in lvl and LEVEL_NAME.encode() in lvl and b"Inventory" in lvl
     reg = (out / "region" / "r.0.0.mcr").read_bytes()
 
     def read_chunk(cx, cz):
@@ -333,15 +343,19 @@ def main():
     # (3) the 128 cap holds for the whole region (incl. landmark stacks)
     assert region_max < 128, f"a column exceeds the 128 cap (max y {region_max})"
 
-    # (4) spawn is safe: solid block at the spawn surface, air just above, SpawnY just over it
+    # (4) spawn is safe: solid surface, 2 air blocks of head clearance, and the
+    # player's FEET (Pos.y - EYE_HEIGHT) land just above the surface block top.
     sy, sb = column_top(spawn_chunk, 24 % 16, 24 % 16)
     assert sb in (GRASS, SNOW, STONE, DIRT), f"spawn surface not solid ground (block {sb})"
     assert sy == SPAWN_SURFACE, f"spawn surface y {sy} != computed {SPAWN_SURFACE}"
     bi = spawn_chunk.find(b"Blocks") + len("Blocks") + 4
-    above = spawn_chunk[bi + ((24 % 16) * 16 + (24 % 16)) * 128 + sy + 1]
-    assert above == AIR, "spawn column is not clear above the surface"
+    col = ((24 % 16) * 16 + (24 % 16)) * 128
+    assert spawn_chunk[bi + col + sy + 1] == AIR and spawn_chunk[bi + col + sy + 2] == AIR, \
+        "spawn column lacks 2 blocks of head clearance"
     assert SPAWN_Y == sy + 1, f"SpawnY {SPAWN_Y} not just above surface {sy}"
-    assert SPAWN[1] > sy and SPAWN[1] <= sy + 2, "Player.Pos Y not safely on the surface"
+    feet = SPAWN[1] - EYE_HEIGHT
+    assert sy + 1 <= feet < sy + 2, \
+        f"player would spawn embedded/floating: feet {feet:.2f}, surface top {sy + 1}"
 
     # (5) strata present: bedrock floor + ores + fluid pockets (from strata_block)
     sbi = spawn_chunk.find(b"Blocks") + len("Blocks") + 4
