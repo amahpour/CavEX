@@ -29,7 +29,16 @@
 #include "block/blocks_data.h"
 #include "stack.h"
 
-#define WORLD_HEIGHT 128
+// World vertical size in blocks. Wii stays at 128 (MEM1 cannot afford taller
+// columns — see CLAUDE.md); PC bumps to 256 (issue #26). Saves written at one
+// height are format-incompatible with the other: a region's Blocks/Data/Light
+// NBT arrays are sized CHUNK_SIZE*CHUNK_SIZE*WORLD_HEIGHT, so 128- and 256-tall
+// worlds cannot be loaded interchangeably. Ship a fresh gen; do not migrate.
+#ifdef PLATFORM_WII
+	#define WORLD_HEIGHT 128
+#else
+	#define WORLD_HEIGHT 256
+#endif
 
 enum world_dim {
 	WORLD_DIM_NETHER = -1,

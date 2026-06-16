@@ -51,6 +51,22 @@ TEST(lighting_heightmap_remove_solid) {
 	ASSERT_EQ(heightmap[4 + 4 * CHUNK_SIZE], 7);
 }
 
+// Regression test for issue #26: at WORLD_HEIGHT 256 a solid block can sit at
+// the ceiling y=255. The per-column heightmap is a single uint8_t, so the
+// natural "first sky cell" value y+1 == 256 wraps to 0 and would flood the
+// whole column with skylight. lighting_heightmap_update must clamp to 255.
+TEST(lighting_heightmap_place_at_ceiling) {
+	uint8_t heightmap[HEIGHTMAP_SIZE] = {0};
+	fake_column column = {0};
+
+	test_blocks_init();
+	// Place a solid block at the very top of a 256-tall world.
+	lighting_heightmap_update(heightmap, 4, 255, 4, BLOCK_STONE, fake_get_block,
+							 &column);
+	// Must NOT be 0 (the 256->0 wrap that lit the entire column); clamped to 255.
+	ASSERT_EQ(heightmap[4 + 4 * CHUNK_SIZE], 255);
+}
+
 /* Tiny 2x2x2 world — strict bounds so BFS cannot escape and OOM. */
 #define LIGHT_GRID 2
 
@@ -110,6 +126,8 @@ TEST(lighting_torch_propagates) {
 const test_entry_t g_tests_lighting[] = {
 	{"lighting_heightmap_place_solid", test_lighting_heightmap_place_solid},
 	{"lighting_heightmap_remove_solid", test_lighting_heightmap_remove_solid},
+	{"lighting_heightmap_place_at_ceiling",
+	 test_lighting_heightmap_place_at_ceiling},
 	{"lighting_torch_propagates", test_lighting_torch_propagates},
 };
 

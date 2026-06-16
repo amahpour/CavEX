@@ -36,9 +36,14 @@
 
 #define WCOORD_CHUNK_OFFSET(x)                                                 \
 	((x) < 0 ? (((x) + 1) / CHUNK_SIZE - 1) : (x) / CHUNK_SIZE)
+// Pack a 3D chunk coordinate into a unique 64-bit id.
+// Layout (issue #26): y in bits 0-5 (6-bit mask 0x3F -> up to 64 chunks =
+// 1024 blocks of headroom; 4 bits / 0xF previously capped Y at 16 chunks = 128
+// and silently truncated taller worlds), x in bits 6-34 and z in bits 35-63
+// (29 bits each). 6 + 29 + 29 = 64, so nothing overflows int64_t.
 #define CHUNK_TO_ID(x, y, z)                                                   \
-	((((int64_t)(z)&0x3FFFFFFF) << 34) | (((int64_t)(x)&0x3FFFFFFF) << 4)      \
-	 | ((int64_t)(y)&0xF))
+	((((int64_t)(z)&0x1FFFFFFF) << 35) | (((int64_t)(x)&0x1FFFFFFF) << 6)      \
+	 | ((int64_t)(y)&0x3F))
 #define W2C_COORD(x) ((x)&CHUNK_SIZE_BITS)
 
 typedef uint32_t c_coord_t;

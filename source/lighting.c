@@ -34,8 +34,19 @@ void lighting_heightmap_update(uint8_t* heightmap, c_coord_t x, w_coord_t y,
 
 	if(blocks[type]
 	   && (!blocks[type]->can_see_through || blocks[type]->opacity > 0)) {
-		if(y >= *height)
-			*height = y + 1;
+		if(y >= *height) {
+			// The heightmap is one uint8_t per column (the Beta on-disk
+			// HeightMap format), so it can only hold 0..255. When WORLD_HEIGHT
+			// is 256 (PC, issue #26) the topmost cell is y=255 and the natural
+			// "first sky cell" value y+1 would be 256, which wraps to 0 and
+			// would flood the whole column with skylight. Clamp to 255: at
+			// worst the single ceiling cell is treated as sky-lit, instead of
+			// the entire column. (Unreachable at WORLD_HEIGHT 128.)
+			if(y >= 255)
+				*height = 255;
+			else
+				*height = (uint8_t)(y + 1);
+		}
 	} else if(y < *height) {
 		while(*height > 0) {
 			struct block_data blk;
