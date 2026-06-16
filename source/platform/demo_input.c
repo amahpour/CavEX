@@ -54,8 +54,12 @@ int demo_button_from_name(const char* name) {
 }
 
 // Apply one whitespace-delimited token (e.g. "FORWARD=1" or "LOOK=+2.0,-1.0")
-// to the keyframe being built. Returns false on a malformed token.
-static bool demo_apply_token(char* token, struct demo_keyframe* kf) {
+// to a button/look state. Returns false on a malformed token. Shared by the
+// demo-script keyframe parser and the live-agent action parser so both honour
+// exactly the same token grammar. `token` is mutated in place (the '=' and ','
+// are split with NULs).
+static bool demo_apply_token(char* token, bool buttons[IB_COUNT],
+							 float* look_dx, float* look_dy) {
 	char* eq = strchr(token, '=');
 	if(!eq)
 		return false;
@@ -78,8 +82,8 @@ static bool demo_apply_token(char* token, struct demo_keyframe* kf) {
 		float dy = strtof(ystr, &end);
 		if(end == ystr || *end != '\0')
 			return false;
-		kf->look_dx = dx;
-		kf->look_dy = dy;
+		*look_dx = dx;
+		*look_dy = dy;
 		return true;
 	}
 
@@ -88,11 +92,11 @@ static bool demo_apply_token(char* token, struct demo_keyframe* kf) {
 		return false;
 
 	if(strcmp(value, "0") == 0) {
-		kf->buttons[b] = false;
+		buttons[b] = false;
 		return true;
 	}
 	if(strcmp(value, "1") == 0) {
-		kf->buttons[b] = true;
+		buttons[b] = true;
 		return true;
 	}
 
@@ -167,7 +171,8 @@ bool demo_parse(const char* text, struct demo_script* out, int* err_line) {
 		// New keyframe inherits the carried state, then applies its own tokens.
 		carry.tick = (int)tick;
 		while((tok = strtok_r(NULL, " \t\r", &save))) {
-			if(!demo_apply_token(tok, &carry)) {
+			if(!demo_apply_token(tok, carry.buttons, &carry.look_dx,
+								 &carry.look_dy)) {
 				if(err_line)
 					*err_line = line_no;
 				return false;
@@ -209,6 +214,37 @@ void demo_state_at(const struct demo_script* s, int tick,
 		*look_dx = active->look_dx;
 	if(look_dy)
 		*look_dy = active->look_dy;
+}
+
+bool agent_parse_action(const char* line, struct agent_action* out) {
+	if(!out)
+		return false;
+
+	memset(out, 0, sizeof(*out)); // omitted fields read neutral
+
+	if(!line)
+		return true; // treated like a blank line: neutral action
+
+	// Copy into a mutable buffer so the token splitter can write NULs; strip a
+	// trailing newline and any '#' comment, mirroring the script grammar.
+	char buf[512];
+	size_t n = 0;
+	for(const char* p = line; *p && *p != '\n' && n < sizeof(buf) - 1; p++)
+		buf[n++] = *p;
+	buf[n] = '\0';
+
+	char* hash = strchr(buf, '#');
+	if(hash)
+		*hash = '\0';
+
+	char* save;
+	for(char* tok = strtok_r(buf, " \t\r", &save); tok;
+		tok = strtok_r(NULL, " \t\r", &save)) {
+		if(!demo_apply_token(tok, out->buttons, &out->look_dx, &out->look_dy))
+			return false;
+	}
+
+	return true;
 }
 
 #ifdef PLATFORM_PC
@@ -322,4 +358,175 @@ struct input_virtual_source* demo_input_create_from_env(void) {
 	return &s->base;
 }
 
-#endif
+// -----------------------------------------------------------------------------
+// Live action source: read one action line from stdin per tick. In GATED mode
+// step_tick() blocks until a full line arrives (pause-think-act); otherwise it
+// drains whatever bytes are ready without blocking and is neutral when no
+// complete line is available this tick (real-time).
+//
+// Input is read from the raw stdin fd with read(), NOT stdio (fgets), and
+// assembled into a persistent line buffer. This avoids two classic traps:
+//   - select()/poll() on the fd cannot see bytes already sitting in a stdio
+//     FILE buffer, so mixing select() with fgets() can miss queued input;
+//   - select()-ready means ">=1 byte", not "a full line", so fgets() can block
+//     mid-line even in real-time mode. Buffering raw bytes ourselves and only
+//     completing an action on a '\n' fixes both.
+//
+// This glue is part of the engine input path (it touches input_virtual_source),
+// which the pure unit-test harness does not link, so it is excluded from the
+// test build (CAVEX_TEST_BUILD). The pure action parser above IS tested.
+#ifndef CAVEX_TEST_BUILD
+
+#include <sys/select.h>
+#include <unistd.h>
+
+#define AGENT_LINE_MAX 512
+
+struct agent_live_source {
+	struct input_virtual_source base;
+	struct agent_action action; // input for the current tick
+	bool gated;					// block per tick until a line arrives
+	bool ended;					// stdin reached EOF -> finish the run
+	bool look_pending;			// apply the look delta once per tick
+	char line[AGENT_LINE_MAX];	// partial line accumulated across reads
+	size_t line_len;			// bytes currently in `line`
+};
+
+static struct agent_live_source agent_live_source_storage;
+
+// True if stdin has at least one byte readable without blocking.
+static bool agent_stdin_ready(void) {
+	fd_set rfds;
+	FD_ZERO(&rfds);
+	FD_SET(STDIN_FILENO, &rfds);
+	struct timeval tv = {0, 0};
+	int r = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
+	return r > 0 && FD_ISSET(STDIN_FILENO, &rfds);
+}
+
+// Pull one complete '\n'-terminated line into out[outsz] (newline stripped,
+// NUL-terminated). Returns 1 on a full line, 0 if none is ready yet (real-time
+// only), -1 on EOF. In gated mode it blocks (read() on a blocking fd) until a
+// line or EOF; in real-time mode it only consumes bytes that are ready.
+static int agent_read_line(struct agent_live_source* s, char* out,
+						   size_t outsz) {
+	for(;;) {
+		// Is a complete line already buffered?
+		for(size_t i = 0; i < s->line_len; i++) {
+			if(s->line[i] == '\n') {
+				size_t n = i < outsz - 1 ? i : outsz - 1;
+				memcpy(out, s->line, n);
+				out[n] = '\0';
+				// Shift the remainder (next line's bytes) down.
+				size_t rest = s->line_len - (i + 1);
+				memmove(s->line, s->line + i + 1, rest);
+				s->line_len = rest;
+				return 1;
+			}
+		}
+
+		// No full line yet. In real-time mode, only read if bytes are waiting.
+		if(!s->gated && !agent_stdin_ready())
+			return 0;
+
+		// Make room; if the buffer is full without a newline the line is over
+		// length -- drop it (keep the latest bytes) rather than block forever.
+		if(s->line_len >= sizeof(s->line)) {
+			fprintf(stderr, "[agent] over-long action line dropped\n");
+			s->line_len = 0;
+		}
+
+		ssize_t got = read(STDIN_FILENO, s->line + s->line_len,
+						   sizeof(s->line) - s->line_len);
+		if(got == 0)
+			return -1; // EOF
+		if(got < 0)
+			return s->gated ? -1 : 0; // treat a read error as no-input/EOF
+		s->line_len += (size_t)got;
+	}
+}
+
+static void agent_live_step_tick(struct input_virtual_source* self, int tick) {
+	(void)tick;
+	struct agent_live_source* s = (struct agent_live_source*)self;
+
+	// Default: no input this tick (real-time mode with nothing pending).
+	memset(&s->action, 0, sizeof(s->action));
+	s->look_pending = true;
+
+	if(s->ended)
+		return;
+
+	char line[AGENT_LINE_MAX];
+	int r = agent_read_line(s, line, sizeof(line));
+	if(r < 0) {
+		// EOF (the driver closed its pipe): end the run after this tick.
+		s->ended = true;
+		return;
+	}
+	if(r == 0)
+		return; // real-time: keep the neutral action, don't block
+
+	// A malformed line is non-fatal here (live input is noisy): warn and treat
+	// the tick as neutral rather than aborting the session.
+	if(!agent_parse_action(line, &s->action)) {
+		fprintf(stderr, "[agent] ignoring malformed action line: %s\n", line);
+		memset(&s->action, 0, sizeof(s->action));
+	}
+}
+
+static bool agent_live_get_button(struct input_virtual_source* self,
+								  enum input_button b) {
+	struct agent_live_source* s = (struct agent_live_source*)self;
+	if(b < 0 || b >= IB_COUNT)
+		return false;
+	return s->action.buttons[b];
+}
+
+static void agent_live_get_look(struct input_virtual_source* self, float* dx,
+								float* dy) {
+	struct agent_live_source* s = (struct agent_live_source*)self;
+	if(s->look_pending) {
+		*dx = s->action.look_dx;
+		*dy = s->action.look_dy;
+		s->look_pending = false; // applied once per tick
+	} else {
+		*dx = 0.0F;
+		*dy = 0.0F;
+	}
+}
+
+static bool agent_live_at_end(struct input_virtual_source* self) {
+	struct agent_live_source* s = (struct agent_live_source*)self;
+	return s->ended;
+}
+
+struct input_virtual_source* agent_input_create_from_env(void) {
+	const char* on = getenv("CAVEX_AGENT");
+	if(!on || on[0] != '1')
+		return NULL;
+
+	struct agent_live_source* s = &agent_live_source_storage;
+	memset(s, 0, sizeof(*s));
+
+	const char* gated = getenv("CAVEX_AGENT_GATED");
+	s->gated = gated && gated[0] == '1';
+
+	s->base.step_tick = agent_live_step_tick;
+	s->base.get_button = agent_live_get_button;
+	s->base.get_look = agent_live_get_look;
+	s->base.at_end = agent_live_at_end;
+
+	printf("[agent] live action source active (%s)\n",
+		   s->gated ? "gated/pause-think-act" : "real-time");
+	fflush(stdout);
+	return &s->base;
+}
+
+bool agent_input_active(void) {
+	return input_get_virtual_source() == &agent_live_source_storage.base;
+}
+
+#endif // !CAVEX_TEST_BUILD
+
+#endif // PLATFORM_PC
