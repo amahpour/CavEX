@@ -1,0 +1,31 @@
+# CavEX demo-replay script (capture rig, issue #66)
+#
+# Format: lines of `@<tick> NAME=0|1 ... LOOK=dx,dy`. State is held until a
+# later keyframe changes it; ticks are 20 Hz. See source/platform/demo_input.h.
+#
+# Tilts the view down toward the ground, then walks forward across the terrain
+# while panning the camera, so the view changes on every frame -- an obvious,
+# lively GIF that proves real, scripted, input-driven gameplay (not a static
+# frame or a force-hack). Drives the player through the REAL input path.
+
+# settle for a moment after the world finishes loading
+@0   FORWARD=0
+
+# tilt the view down a touch so the ground/terrain fills the frame
+@4   LOOK=0.0,0.06
+
+# straighten the pitch and start walking forward
+@20  LOOK=0.0,0.0 FORWARD=1
+
+# pan the view left a little while walking
+@40  LOOK=-0.04,0.0
+
+# pan back to the right
+@78  LOOK=0.04,0.0
+
+# straighten up, keep walking forward
+@108 LOOK=0.0,0.0
+
+# halt; hold the final frame briefly, then the rig ends the run
+@120 FORWARD=0
+@128 FORWARD=0

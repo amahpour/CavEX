@@ -451,6 +451,52 @@ void input_native_joystick(float dt, float* dx, float* dy) {
 
 #include "../game/game_state.h"
 
+#ifdef PLATFORM_PC
+// Virtual-input (demo-replay) source. NULL = normal hardware input, so when no
+// demo is loaded every query below falls through to the real input path and
+// behaviour is identical to a build without the rig. See input.h / demo_input.h.
+static struct input_virtual_source* input_virtual_src = NULL;
+
+// Button state latched at the last tick boundary so that input_pressed /
+// input_released report exactly one edge per tick transition, independent of
+// how many frames (and thus query calls) fall within a tick.
+static bool input_virtual_cur[IB_COUNT];
+static bool input_virtual_prev[IB_COUNT];
+
+void input_set_virtual_source(struct input_virtual_source* src) {
+	input_virtual_src = src;
+	for(int b = 0; b < IB_COUNT; b++)
+		input_virtual_cur[b] = input_virtual_prev[b] = false;
+}
+
+struct input_virtual_source* input_get_virtual_source(void) {
+	return input_virtual_src;
+}
+
+void input_virtual_step_tick(int tick) {
+	if(!input_virtual_src)
+		return;
+
+	if(input_virtual_src->step_tick)
+		input_virtual_src->step_tick(input_virtual_src, tick);
+
+	// Snapshot the per-tick button levels and roll the previous set forward so
+	// edges (pressed/released) are derived from tick-to-tick transitions.
+	for(int b = 0; b < IB_COUNT; b++) {
+		input_virtual_prev[b] = input_virtual_cur[b];
+		input_virtual_cur[b] = input_virtual_src->get_button
+			? input_virtual_src->get_button(input_virtual_src,
+											(enum input_button)b)
+			: false;
+	}
+}
+
+bool input_virtual_at_end(void) {
+	return input_virtual_src && input_virtual_src->at_end
+		&& input_virtual_src->at_end(input_virtual_src);
+}
+#endif
+
 static const char* input_config_translate(enum input_button key) {
 	switch(key) {
 		case IB_ACTION1: return "input.item_action_left";
@@ -511,6 +557,11 @@ bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 }
 
 bool input_pressed(enum input_button b) {
+#ifdef PLATFORM_PC
+	if(input_virtual_src)
+		return input_virtual_cur[b] && !input_virtual_prev[b];
+#endif
+
 	const char* key = input_config_translate(b);
 
 	if(!key)
@@ -542,6 +593,11 @@ bool input_pressed(enum input_button b) {
 }
 
 bool input_released(enum input_button b) {
+#ifdef PLATFORM_PC
+	if(input_virtual_src)
+		return !input_virtual_cur[b] && input_virtual_prev[b];
+#endif
+
 	const char* key = input_config_translate(b);
 
 	if(!key)
@@ -573,6 +629,11 @@ bool input_released(enum input_button b) {
 }
 
 bool input_held(enum input_button b) {
+#ifdef PLATFORM_PC
+	if(input_virtual_src)
+		return input_virtual_cur[b];
+#endif
+
 	const char* key = input_config_translate(b);
 
 	if(!key)
@@ -601,6 +662,15 @@ bool input_held(enum input_button b) {
 }
 
 bool input_joystick(float dt, float* x, float* y) {
+#ifdef PLATFORM_PC
+	if(input_virtual_src) {
+		*x = *y = 0.0F;
+		if(input_virtual_src->get_look)
+			input_virtual_src->get_look(input_virtual_src, x, y);
+		return true;
+	}
+#endif
+
 	input_native_joystick(dt, x, y);
 	return true;
 }

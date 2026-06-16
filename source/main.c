@@ -44,6 +44,10 @@
 #include "platform/input.h"
 #include "world.h"
 
+#ifdef PLATFORM_PC
+#include "platform/demo_input.h"
+#endif
+
 #include "cNBT/nbt.h"
 #include "cglm/cglm.h"
 #include "lodepng/lodepng.h"
@@ -93,6 +97,17 @@ int main(void) {
 	config_create(&gstate.config_user, "config.json");
 
 	input_init();
+
+#ifdef PLATFORM_PC
+	// Demo-replay capture rig (dev only, env-gated by CAVEX_DEMO). When unset
+	// this is a no-op and input/gameplay is byte-identical to a normal build.
+	{
+		struct input_virtual_source* demo = demo_input_create_from_env();
+		if(demo)
+			input_set_virtual_source(demo);
+	}
+#endif
+
 	blocks_init();
 	items_init();
 	recipe_init();
@@ -132,6 +147,17 @@ int main(void) {
 						   / DAY_TICK_MS)
 					  % DAY_LENGTH_TICKS)
 			/ (float)DAY_LENGTH_TICKS;
+
+#ifdef PLATFORM_PC
+		// Demo-replay capture should be reproducible, so stop wall-clock values
+		// from leaking into the rendered frame: hold the time-of-day fixed (sky
+		// + lighting). The FPS/timing readout the debug overlay prints is zeroed
+		// just before the 2D pass (gfx_flip_buffers rewrites dt_gpu/dt_vsync
+		// later in the loop). No effect outside demo mode.
+		bool demo_capture = input_get_virtual_source() != NULL;
+		if(demo_capture)
+			daytime = 0.5F; // midday, stable lighting
+#endif
 
 		clin_update();
 
@@ -230,11 +256,50 @@ int main(void) {
 
 		float tick_delta = time_diff_s(last_tick, time_get()) / 0.05F;
 
+#ifdef PLATFORM_PC
+		static int demo_tick = 0;	  // monotonic 20 Hz demo clock (PC rig)
+		int demo_ticks_this_frame = 0; // ticks the demo stepped this frame
+
+		// The demo only drives input once the local player is actually accepting
+		// it (capture_input) -- i.e. on screen_ingame, not the load screen. Both
+		// the entity tick and camera look are gated on capture_input, so stepping
+		// the demo any earlier would silently drop those ticks (a script's `@0`
+		// keyframe would be lost). Gating here keeps the very first scripted tick
+		// landing on the first tick gameplay reads, which also makes the start
+		// point identical across runs.
+		bool demo_ready = input_get_virtual_source() && gstate.local_player
+			&& gstate.local_player->data.local_player.capture_input;
+#endif
+
+		// The demo is stepped INSIDE the normal 20 Hz accumulator so simulation
+		// runs at the real tick rate (one tick per frame would couple sim speed
+		// to frame rate and over-tick the entity system). Each elapsed tick that
+		// the demo drives is counted so capture can emit one image per tick.
 		while(tick_delta >= 1.0F) {
 			last_tick = time_add_ms(last_tick, 50);
 			tick_delta -= 1.0F;
+#ifdef PLATFORM_PC
+			bool demo_done = false;
+			if(demo_ready) {
+				input_virtual_step_tick(demo_tick++);
+				demo_ticks_this_frame++;
+				// Stop at exactly the last scripted tick so the total tick count
+				// (and thus the captured frame count) is independent of how many
+				// ticks happen to elapse in the final frame -- this is what keeps
+				// "same script twice -> same frame count" true.
+				demo_done = input_virtual_at_end();
+			}
+#endif
 			particle_update();
 			entities_client_tick(gstate.entities);
+#ifdef PLATFORM_PC
+			// End after fully simulating this tick; the run holds the final state
+			// for one rendered frame, then the rig stitches the dumped frames.
+			if(demo_done) {
+				gstate.quit = true;
+				break;
+			}
+#endif
 		}
 
 		if(gstate.local_player)
@@ -345,6 +410,16 @@ int main(void) {
 							  0x80);
 		}
 
+#ifdef PLATFORM_PC
+		// Zero the wall-clock timing readout so the captured debug overlay is
+		// byte-identical across demo runs (see demo_capture note above).
+		if(demo_capture) {
+			gstate.stats.fps = 0.0F;
+			gstate.stats.dt_gpu = 0.0F;
+			gstate.stats.dt_vsync = 0.0F;
+		}
+#endif
+
 		if(gstate.current_screen->render2D)
 			gstate.current_screen->render2D(gstate.current_screen, gfx_width(),
 											gfx_height());
@@ -376,16 +451,46 @@ int main(void) {
 				const char* e = getenv("CAVEX_AUTOSHOT");
 				autoshot_every = (e && atoi(e) > 0) ? atoi(e) : -1;
 			}
-			if(autoshot_every > 0 && ++autoshot_frame % autoshot_every == 0) {
+
+			// Frames to dump this iteration. Normally 0 or 1; in demo mode one
+			// per tick stepped this frame so the frame set is keyed to the 20 Hz
+			// demo tick (FPS-independent, identical count across runs -- this is
+			// what makes "same script twice -> same frames" hold for the frame
+			// set). If several ticks elapsed in one slow frame, the same rendered
+			// framebuffer is written for each so tick numbering stays contiguous.
+			int first_tick = 0, last_tick_excl = 0;
+			bool frame_capture = false; // non-demo: one numbered shot
+
+#ifdef PLATFORM_PC
+			bool demo_active = input_get_virtual_source() != NULL;
+			if(autoshot_every > 0 && demo_active && demo_ticks_this_frame > 0) {
+				first_tick = demo_tick - demo_ticks_this_frame;
+				last_tick_excl = demo_tick;
+			}
+#else
+			bool demo_active = false;
+#endif
+
+			if(!demo_active && autoshot_every > 0
+			   && ++autoshot_frame % autoshot_every == 0)
+				frame_capture = true;
+
+			if(first_tick < last_tick_excl || frame_capture) {
 				size_t width, height;
 				gfx_copy_framebuffer(NULL, &width, &height);
 				void* image = malloc(width * height * 4);
 				if(image) {
 					gfx_copy_framebuffer(image, &width, &height);
 					char name[64];
-					snprintf(name, sizeof(name), "autoshot_%06d.png",
-							 autoshot_frame);
-					lodepng_encode32_file(name, image, width, height);
+					if(frame_capture) {
+						snprintf(name, sizeof(name), "autoshot_%06d.png",
+								 autoshot_frame);
+						lodepng_encode32_file(name, image, width, height);
+					}
+					for(int t = first_tick; t < last_tick_excl; t++) {
+						snprintf(name, sizeof(name), "autoshot_%06d.png", t);
+						lodepng_encode32_file(name, image, width, height);
+					}
 					free(image);
 				}
 			}
