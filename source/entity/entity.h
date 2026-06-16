@@ -60,6 +60,7 @@ struct entity {
 			bool capture_input;
 			bool flying;
 			int jump_tap_window;
+			bool jump_held_prev;
 		} local_player;
 		struct entity_item {
 			struct item_data item;
@@ -80,6 +81,9 @@ bool entity_local_player_block_collide(vec3 pos, struct block_info* blk_info);
 // double-tap window (decremented by the caller each tick). Returns true on the
 // second press inside the window (i.e. a toggle should fire); the window is
 // reset in either case. Pure (no engine state) so it is unit-testable.
+// Length of the double-tap window in 20 Hz ticks (50 ms/tick): both jump taps
+// must fall within this many ticks to toggle flight. 10 ticks ~= 0.5 s.
+#define JUMP_TAP_WINDOW 10
 bool detect_double_tap(bool pressed, int* window);
 
 void entity_item(uint32_t id, struct entity* e, bool server, void* world,

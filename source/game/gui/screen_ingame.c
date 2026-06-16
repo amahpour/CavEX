@@ -338,6 +338,14 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 			VERSION_MINOR, VERSION_PATCH);
 	gutil_text(4, 4 + 17 * 0, str, 16, true);
 
+	// Creative-flight indicator: visible whenever the local player is flying so
+	// the double-tap-Jump toggle gives immediate, unambiguous feedback even when
+	// hovering in place on the ground.
+	if(gstate.local_player && gstate.local_player->data.local_player.flying)
+		gutil_text(4, 4 + 17 * 4,
+				   "FLYING  (hold Jump = up, Sneak = down, double-tap Jump = off)",
+				   16, true);
+
 #ifdef PLATFORM_WII
 	{
 		// temporary diagnostics: show raw WPAD expansion data on screen
