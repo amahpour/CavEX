@@ -42,6 +42,7 @@ enum input_button {
 	IB_GUI_CLICK,
 	IB_GUI_CLICK_ALT,
 	IB_SCREENSHOT,
+	IB_COUNT,
 };
 
 enum input_category {
@@ -66,6 +67,31 @@ bool input_pointer(float* x, float* y, float* angle);
 #ifdef PLATFORM_PC
 // fed by the GLFW scroll callback; mouse wheel drives hotbar switching
 void input_native_scroll(double yoffset);
+
+// Virtual-input (demo-replay) hook — PC dev rig only, see demo_input.h.
+//
+// When a virtual source is installed the IB-level queries (input_held /
+// input_pressed / input_released) and the look delta (input_joystick) return
+// the scripted state instead of real hardware input. NULL (the default) means
+// normal hardware input — gameplay is byte-identical to a build without the rig.
+//
+// step_tick() is called once per 20 Hz game tick to advance the source;
+// at_end() then reports when the script has finished (the rig quits the game).
+struct input_virtual_source {
+	void (*step_tick)(struct input_virtual_source* self, int tick);
+	bool (*get_button)(struct input_virtual_source* self, enum input_button b);
+	void (*get_look)(struct input_virtual_source* self, float* dx, float* dy);
+	bool (*at_end)(struct input_virtual_source* self);
+};
+
+// Install (or, with NULL, remove) the active virtual source.
+void input_set_virtual_source(struct input_virtual_source* src);
+// The currently installed source, or NULL for hardware input.
+struct input_virtual_source* input_get_virtual_source(void);
+// Advance the active source by one tick (no-op when none is installed).
+void input_virtual_step_tick(int tick);
+// True when a virtual source is installed and its script has finished.
+bool input_virtual_at_end(void);
 #endif
 
 #endif

@@ -18,5 +18,13 @@
 # Autonomous test-rig screenshots (CAVEX_AUTOSHOT)
 autoshot_*.png
 
+# Capture-rig proof artifacts (issue #66) -- hosted as release assets, never
+# committed (see scripts/capture_demo.sh).
+*.gif
+*.mp4
+
 # Local dev handoff notes (not part of project history)
 HANDOFF.md
+
+# Python bytecode cache
+__pycache__/
