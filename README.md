@@ -101,6 +101,13 @@ Controls are WASD + mouse look, left/right mouse button to mine/place, Space to
 jump, Left-Shift to sneak, E for the inventory and F2 for a screenshot. See
 [`controls.md`](controls.md) for the full list.
 
+## Tutorials
+
+Kid-friendly, step-by-step guides for building things in-game:
+
+* [How to make a bubble elevator](docs/tutorials/bubble-elevator.md) — stack
+  bubble blocks and ride them straight up.
+
 ## Tests
 
 Headless unit tests (no OpenGL) run via:
