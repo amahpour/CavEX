@@ -117,6 +117,9 @@ enum block_type {
 	BLOCK_TRAP_DOOR = 96,
 	BLOCK_CANDLE = 97,
 	BLOCK_BUBBLE_COLUMN = 98,
+	BLOCK_SMOOTH_STONE = 99,
+	BLOCK_SMOOTH_SANDSTONE = 100,
+	BLOCK_OAK_WOOD = 101,
 };
 
 typedef int32_t w_coord_t;

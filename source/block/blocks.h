@@ -155,6 +155,9 @@ extern struct block block_trapdoor;
 extern struct block block_wooden_door;
 extern struct block block_iron_door;
 extern struct block block_candle;
+extern struct block block_smooth_stone;
+extern struct block block_smooth_sandstone;
+extern struct block block_oak_wood;
 
 extern struct block* blocks[256];
 

@@ -116,6 +116,29 @@ TEST(recipe_init_full_table) {
 		slots[k] = (struct item_data) {.id = BLOCK_DIRT};
 	ASSERT(!recipe_match(recipes_crafting, slots, slot_empty, &result));
 
+	// issue #29 decorative blocks: each must be craftable (reachable in normal
+	// play). Each is a 2x2 of an existing block placed in the grid's top-left.
+	struct {
+		enum block_type ingredient;
+		enum block_type result;
+		uint8_t count;
+	} decorative[] = {
+		{BLOCK_STONE, BLOCK_SMOOTH_STONE, 4},
+		{BLOCK_SANDSTONE, BLOCK_SMOOTH_SANDSTONE, 4},
+		{BLOCK_LOG, BLOCK_OAK_WOOD, 3},
+	};
+	for(size_t c = 0; c < sizeof(decorative) / sizeof(decorative[0]); c++) {
+		memset(slots, 0, sizeof(slots));
+		memset(slot_empty, true, sizeof(slot_empty));
+		slots[0] = slots[1] = slots[3] = slots[4]
+			= (struct item_data) {.id = decorative[c].ingredient};
+		slot_empty[0] = slot_empty[1] = slot_empty[3] = slot_empty[4] = false;
+
+		ASSERT(recipe_match(recipes_crafting, slots, slot_empty, &result));
+		ASSERT_EQ(result.id, (uint8_t)decorative[c].result);
+		ASSERT_EQ(result.count, (uint8_t)decorative[c].count);
+	}
+
 	array_recipe_clear(recipes_crafting);
 }
 
