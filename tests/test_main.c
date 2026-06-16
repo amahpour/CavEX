@@ -49,6 +49,9 @@ extern const size_t g_tests_entity_count;
 extern const test_entry_t g_tests_double_tap[];
 extern const size_t g_tests_double_tap_count;
 
+extern const test_entry_t g_tests_map[];
+extern const size_t g_tests_map_count;
+
 extern const test_entry_t g_tests_chunk[];
 extern const size_t g_tests_chunk_count;
 
@@ -80,8 +83,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[23];
-static const size_t group_count = 23;
+static test_group_t groups[24];
+static const size_t group_count = 24;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -109,6 +112,7 @@ static void init_groups(void) {
 	groups[21]
 		= (test_group_t){g_tests_state_export, g_tests_state_export_count};
 	groups[22] = (test_group_t){g_tests_firework, g_tests_firework_count};
+	groups[23] = (test_group_t){g_tests_map, g_tests_map_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {

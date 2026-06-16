@@ -38,6 +38,7 @@ static const struct {
 	{"JUMP", IB_JUMP},				 {"SNEAK", IB_SNEAK},
 	{"INVENTORY", IB_INVENTORY},	 {"HOME", IB_HOME},
 	{"SCROLL_LEFT", IB_SCROLL_LEFT}, {"SCROLL_RIGHT", IB_SCROLL_RIGHT},
+	{"MAP", IB_MAP},
 };
 
 int demo_button_from_name(const char* name) {

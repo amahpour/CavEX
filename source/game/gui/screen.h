@@ -35,6 +35,7 @@ struct screen {
 extern struct screen screen_ingame;
 extern struct screen screen_load_world;
 extern struct screen screen_select_world;
+extern struct screen screen_map;
 extern struct screen screen_inventory;
 extern struct screen screen_crafting;
 extern struct screen screen_furnace;
