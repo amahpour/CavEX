@@ -112,6 +112,7 @@ add_executable(cavex
 				source/game/gui/screen.c
 				source/game/camera.c
 				source/game/game_state.c
+				source/game/state_export.c
 
 				source/item/window_container.c
 				source/item/inventory.c

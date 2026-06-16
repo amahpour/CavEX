@@ -28,6 +28,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/entity/entity_id.c
 	${CMAKE_SOURCE_DIR}/source/entity/entity_local_player.c
 	${CMAKE_SOURCE_DIR}/source/platform/demo_input.c
+	${CMAKE_SOURCE_DIR}/source/game/state_export.c
 	stubs/chunk_link_stub.c
 	stubs/game_state_stub.c
 	stubs/blocks_stub.c
@@ -47,7 +48,8 @@ target_include_directories(cavex_testlib PRIVATE
 	${CMAKE_SOURCE_DIR}/source/entity
 )
 
-target_compile_definitions(cavex_testlib PRIVATE PLATFORM_PC CGLM_ALL_UNALIGNED)
+target_compile_definitions(cavex_testlib PRIVATE PLATFORM_PC CGLM_ALL_UNALIGNED
+	CAVEX_TEST_BUILD)
 set_target_properties(cavex_testlib PROPERTIES C_STANDARD 99)
 
 if(CAVEX_COVERAGE)
@@ -74,6 +76,7 @@ add_executable(cavex_tests
 	test_entity.c
 	test_double_tap.c
 	test_demo.c
+	test_state_export.c
 	test_chunk.c
 	test_inventory.c
 	test_window.c

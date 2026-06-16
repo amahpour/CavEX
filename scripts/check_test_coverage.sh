@@ -49,6 +49,7 @@ OBJECTS=(
 	"__/source/entity/entity_id.c.o"
 	"__/source/entity/entity_local_player.c.o"
 	"__/source/platform/demo_input.c.o"
+	"__/source/game/state_export.c.o"
 )
 
 if [[ ! -x "$TEST_BIN" ]]; then

@@ -45,6 +45,7 @@
 #include "world.h"
 
 #ifdef PLATFORM_PC
+#include "game/state_export.h"
 #include "platform/demo_input.h"
 #endif
 
@@ -99,12 +100,19 @@ int main(void) {
 	input_init();
 
 #ifdef PLATFORM_PC
-	// Demo-replay capture rig (dev only, env-gated by CAVEX_DEMO). When unset
-	// this is a no-op and input/gameplay is byte-identical to a normal build.
+	// Virtual-input dev rig (dev only, env-gated). When no env var is set this
+	// is a no-op and input/gameplay is byte-identical to a normal build.
+	//   CAVEX_DEMO=<script>  -> deterministic file-replay source (#66)
+	//   CAVEX_AGENT=1        -> live action source reading stdin (#67); a driver
+	//                           reads the per-tick state line and writes actions.
+	// The live agent source takes precedence if both are set (it is the
+	// interactive path). Only one virtual source can be installed.
 	{
-		struct input_virtual_source* demo = demo_input_create_from_env();
-		if(demo)
-			input_set_virtual_source(demo);
+		struct input_virtual_source* src = agent_input_create_from_env();
+		if(!src)
+			src = demo_input_create_from_env();
+		if(src)
+			input_set_virtual_source(src);
 	}
 #endif
 
@@ -281,6 +289,12 @@ int main(void) {
 #ifdef PLATFORM_PC
 			bool demo_done = false;
 			if(demo_ready) {
+				// Live agent (#67): publish the state for this tick BEFORE the
+				// source reads its action, so the driver decides on the world it
+				// is about to act in. In gated mode the step below then blocks
+				// until the driver's action line arrives (pause-think-act).
+				if(agent_input_active())
+					state_export_emit(demo_tick);
 				input_virtual_step_tick(demo_tick++);
 				demo_ticks_this_frame++;
 				// Stop at exactly the last scripted tick so the total tick count

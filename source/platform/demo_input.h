@@ -84,12 +84,55 @@ bool demo_parse(const char* text, struct demo_script* out, int* err_line);
 void demo_state_at(const struct demo_script* s, int tick,
 				   bool buttons_out[IB_COUNT], float* look_dx, float* look_dy);
 
+// -----------------------------------------------------------------------------
+// Live action source (issue #67): an external driver (an LLM agent or a
+// heuristic script) plays CavEX by writing one ACTION LINE per tick to the
+// game's stdin while the game emits its state on stdout (see state_export.h).
+//
+// An action line is whitespace-separated `NAME=VALUE` tokens describing the
+// input for the NEXT tick only (it does NOT persist like the demo script's
+// keyframes -- a live driver re-states the full intent each tick):
+//
+//   FORWARD=1 LOOK=+0.05,0.0      walk forward, pan right a little
+//   JUMP=1 MINE=1                 jump and mine
+//   (empty line)                  no input this tick
+//
+//   NAME=0|1     a button held-state for this tick (same names as the script:
+//                FORWARD, BACKWARD, LEFT, RIGHT, JUMP, SNEAK, MINE/ACTION1,
+//                PLACE/ACTION2, INVENTORY, ...). Omitted buttons default to 0.
+//   LOOK=dx,dy   per-tick look delta (same units as the script's LOOK).
+
+// One resolved action: the full per-tick input. Unlike a keyframe this is a
+// complete, self-contained state (no inheritance) -- exactly what one line says.
+struct agent_action {
+	bool buttons[IB_COUNT];
+	float look_dx, look_dy;
+};
+
+// Parse a single action line into `out` (cleared first, so omitted fields read
+// neutral). Pure: no I/O, no globals. A blank/comment-only line is valid and
+// yields the neutral action. Returns true on success; false on a malformed
+// token. Exposed for testing.
+bool agent_parse_action(const char* line, struct agent_action* out);
+
 #ifdef PLATFORM_PC
 // Build a file-replay virtual source from CAVEX_DEMO (a script path). Returns a
 // pointer suitable for input_set_virtual_source(), or NULL if the env var is
 // unset or the file cannot be read/parsed (in which case gameplay is unchanged).
 // The returned source is owned by the module (static storage); do not free it.
 struct input_virtual_source* demo_input_create_from_env(void);
+
+// Build a LIVE virtual source that reads action lines from stdin, when
+// CAVEX_AGENT=1 is set (otherwise returns NULL and gameplay is unchanged). With
+// CAVEX_AGENT_GATED=1 the source blocks per tick until the next action line
+// arrives (pause-think-act for a slow driver); otherwise a tick with no pending
+// line is neutral (real-time). The returned source is owned by the module
+// (static storage); do not free it.
+struct input_virtual_source* agent_input_create_from_env(void);
+
+// True when the agent live source is active (CAVEX_AGENT=1 was honoured). Lets
+// the main loop know it should emit a state line each tick. PC dev rig only.
+bool agent_input_active(void);
 #endif
 
 #endif
