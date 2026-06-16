@@ -3,29 +3,33 @@
 # Format: lines of `@<tick> NAME=0|1 ... LOOK=dx,dy`. State is held until a
 # later keyframe changes it; ticks are 20 Hz. See source/platform/demo_input.h.
 #
-# Tilts the view down toward the ground, then walks forward across the terrain
-# while panning the camera, so the view changes on every frame -- an obvious,
-# lively GIF that proves real, scripted, input-driven gameplay (not a static
-# frame or a force-hack). Drives the player through the REAL input path.
+# CONTINUOUS-MOTION demo (issue #66 smoothness follow-up): once walking starts
+# the player NEVER stands still and the camera is ALWAYS panning, so every
+# 20 Hz tick renders a different frame. That is what lets the stitcher produce a
+# smooth, continuous GIF -- there are no held/idle ticks to collapse into a
+# static pause. (The dedup pass would drop such dupes anyway, but emitting only
+# moving frames keeps the captured clip honest and full-length.) Drives the
+# player through the REAL input path, not a force-hack.
 
-# settle for a moment after the world finishes loading
-@0   FORWARD=0
+# Brief settle so the world finishes meshing (these head frames are dropped by
+# the capture's GIF_START and would be deduped regardless). Tilt the view down a
+# touch so the ground fills the frame; this is the only near-static stretch.
+@0   FORWARD=0 LOOK=0.0,0.04
 
-# tilt the view down a touch so the ground/terrain fills the frame
-@4   LOOK=0.0,0.06
+# Start walking forward AND start a gentle continuous left pan. From here on
+# both translation and rotation are always non-zero, so no two frames match.
+@20  LOOK=-0.05,0.0 FORWARD=1
 
-# straighten the pitch and start walking forward
-@20  LOOK=0.0,0.0 FORWARD=1
+# Sweep the camera back to the right (still walking) -- a slow, steady pan.
+@55  LOOK=0.05,0.0
 
-# pan the view left a little while walking
-@40  LOOK=-0.04,0.0
+# Sweep left again so the motion keeps reversing without ever pausing.
+@95  LOOK=-0.05,0.0
 
-# pan back to the right
-@78  LOOK=0.04,0.0
+# Final stretch: ease the pan to a slower right drift while still walking, so
+# even the last captured frames are in motion (no trailing idle hold).
+@130 LOOK=0.03,0.0
 
-# straighten up, keep walking forward
-@108 LOOK=0.0,0.0
-
-# halt; hold the final frame briefly, then the rig ends the run
-@120 FORWARD=0
-@128 FORWARD=0
+# End the run while still moving forward; the rig stops at the last scripted
+# tick. No idle/hold keyframe -> the clip ends on a frame that changed.
+@150 FORWARD=1
