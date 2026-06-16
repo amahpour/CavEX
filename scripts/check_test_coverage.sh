@@ -42,6 +42,7 @@ OBJECTS=(
 	"__/source/parson/parson.c.o"
 	"__/source/lighting.c.o"
 	"__/source/item/recipe.c.o"
+	"__/source/item/items/item_firework.c.o"
 	"__/source/item/tool.c.o"
 	"__/source/item/inventory.c.o"
 	"__/source/item/window_container.c.o"

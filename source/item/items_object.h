@@ -1403,3 +1403,4 @@ static struct item item_saddle = {
 extern struct item item_sugarcane;
 extern struct item item_door_wood;
 extern struct item item_door_iron;
+extern struct item item_firework;

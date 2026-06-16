@@ -317,6 +317,23 @@ void clin_process(struct client_rpc* call) {
 			if(e)
 				glm_vec3_copy(call->payload.entity_move.pos, e->network_pos);
 		} break;
+		case CRPC_PARTICLE_BURST: {
+			// runs on the client thread, which owns the particle array and
+			// gstate.rand_src; emit an outward + upward spark burst
+			for(uint16_t k = 0; k < call->payload.particle_burst.count; k++) {
+				vec3 dir = {rand_gen_flt(&gstate.rand_src) - 0.5F,
+							rand_gen_flt(&gstate.rand_src) - 0.5F,
+							rand_gen_flt(&gstate.rand_src) - 0.5F};
+				glm_vec3_normalize(dir);
+
+				vec3 vel;
+				glm_vec3_scale(dir, 0.18F, vel);
+				vel[1] += 0.2F;
+
+				particle_spawn(call->payload.particle_burst.pos, vel,
+							   call->payload.particle_burst.tex);
+			}
+		} break;
 	}
 }
 

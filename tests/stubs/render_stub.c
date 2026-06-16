@@ -8,9 +8,11 @@
 */
 
 #include "block/blocks.h"
+#include "cglm/cglm.h"
 #include "graphics/texture_atlas.h"
 #include "graphics/render_block.h"
 #include "graphics/render_item.h"
+#include "network/client_interface.h"
 
 size_t render_block_full(struct displaylist* d, struct block_info* this,
 						 enum side side, struct block_info* it,
@@ -47,4 +49,25 @@ bool block_place_default(struct server_local* s, struct item_data* it,
 uint8_t tex_atlas_lookup(enum tex_atlas_entry name) {
 	(void)name;
 	return 0;
+}
+
+void render_item_flat(struct item* item, struct item_data* stack, mat4 view,
+					  bool fullbright, enum render_item_env env) {
+	(void)item;
+	(void)stack;
+	(void)view;
+	(void)fullbright;
+	(void)env;
+}
+
+// Capturing stub for clin_rpc_send so item_firework's firework_use() links in
+// the harness (the real client/server interface is GX/thread-bound and is not
+// compiled into the tests). Records the last RPC so the firework test can
+// verify the particle-burst request.
+struct client_rpc test_last_client_rpc;
+int test_client_rpc_count = 0;
+
+void clin_rpc_send(struct client_rpc* call) {
+	test_last_client_rpc = *call;
+	test_client_rpc_count++;
 }

@@ -116,6 +116,7 @@ enum item_type {
 	ITEM_SUGAR = 353,
 	ITEM_BED = 355,
 	ITEM_SHEARS = 359,
+	ITEM_FIREWORK = 360,
 };
 
 #include "../block/blocks_data.h"
@@ -154,6 +155,11 @@ struct item {
 					   enum render_item_env);
 	bool (*onItemPlace)(struct server_local*, struct item_data*,
 						struct block_info*, struct block_info*, enum side);
+	// Called when the item is right-clicked ("used") rather than placed.
+	// NULL for every item that has no use action (designated initializers
+	// default it to NULL, so existing item defs need no change). Returns true
+	// when the use succeeded and one item should be consumed from the stack.
+	bool (*onItemUse)(struct server_local*, struct item_data*);
 	struct item_armor {
 		bool is_armor;
 		enum armor_type type;

@@ -509,6 +509,13 @@ void recipe_init() {
 		recipes_crafting,
 		(struct item_data) {.id = ITEM_BOOK, .durability = 0, .count = 1}, 1, 3,
 		(uint8_t[]) {1, 1, 1}, (struct item_data) {.id = ITEM_PAPER}, false);
+	// firework rocket: paper above gunpowder (#31)
+	recipe_add(recipes_crafting,
+			   (struct item_data) {
+				   .id = ITEM_FIREWORK, .durability = 0, .count = 1},
+			   1, 2, (uint8_t[]) {1, 2},
+			   (struct item_data) {.id = ITEM_PAPER}, false,
+			   (struct item_data) {.id = ITEM_GUNPOWDER}, false);
 	recipe_add(
 		recipes_crafting,
 		(struct item_data) {.id = BLOCK_SLAB, .durability = 3, .count = 3}, 3,

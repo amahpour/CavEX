@@ -34,6 +34,9 @@ struct particle {
 };
 
 void particle_init(void);
+// Public wrapper over the internal particle_add(): spawn one particle at pos
+// with velocity vel, using terrain-atlas tile index tex.
+void particle_spawn(vec3 pos, vec3 vel, uint8_t tex);
 void particle_generate_block(struct block_info* info);
 void particle_generate_side(struct block_info* info, enum side s);
 void particle_update(void);
