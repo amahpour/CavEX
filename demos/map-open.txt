@@ -1,0 +1,59 @@
+# CavEX demo-replay script -- clickable world map (issue #35 / PR #62).
+#
+# Format: lines of `@<tick> NAME=0|1 ... LOOK=dx,dy`. State is held until a
+# later keyframe changes it; ticks are 20 Hz. See source/platform/demo_input.h.
+#
+# Goal: produce a SMOOTH, continuous clip that shows the map feature -- walk a
+# few steps across varied terrain (so the world view is always moving and the
+# stitcher keeps the frames), then press the MAP key to OPEN the full-screen
+# map: a colour-coded terrain grid with a red player marker at centre. Pan the
+# view, then re-open so the map is shown clearly.
+#
+# LIMITATION (documented in the PR): tap-to-teleport needs a GUI cursor CLICK,
+# which the headless rig cannot inject (it drives buttons + look only, no GUI
+# pointer). So this demo shows the map OPENING + the coloured terrain + marker,
+# NOT the click-teleport.
+
+# Brief settle so the world finishes meshing (these head frames are dropped by
+# the capture's GIF_START and are deduped regardless). Tilt the view down a
+# touch so the ground fills the frame.
+@0   FORWARD=0 LOOK=0.0,0.05
+
+# Walk forward with a gentle continuous left pan -- both translation and
+# rotation non-zero, so every tick renders a distinct (kept) frame. This stretch
+# is long enough to clear the capture's real-motion floor before the map opens.
+@20  FORWARD=1 LOOK=-0.05,0.0
+
+# Sweep the camera back to the right while still walking.
+@50  LOOK=0.05,0.0
+
+# Sweep left again -- keep reversing so the motion never pauses.
+@75  LOOK=-0.05,0.0
+
+# Stop walking and level the view just before opening the map.
+@95  FORWARD=0 LOOK=0.0,0.0
+
+# OPEN the map: pulse the MAP key for one tick (rising edge -> screen_ingame
+# switches to screen_map), then release it so the map stays open (its update
+# only closes on a fresh MAP press). The map snapshots the player's column as
+# the centre and draws the coloured terrain grid + red marker.
+@100 MAP=1
+@101 MAP=0
+
+# Hold the map open so the coloured terrain grid + centre marker are clearly
+# visible in the captured frames. (A static screen; the stitcher keeps the last
+# unique frame, so the map IS shown even though held dupes are collapsed.)
+@140 MAP=0
+
+# Close the map (pulse MAP again) and take a couple of walking steps so the
+# clip ends on motion rather than a static hold.
+@150 MAP=1
+@151 MAP=0 FORWARD=1 LOOK=0.04,0.0
+
+# RE-OPEN the map from the new position to show it a second time.
+@175 FORWARD=0 LOOK=0.0,0.0
+@180 MAP=1
+@181 MAP=0
+
+# Hold the second map view, then end the run.
+@215 MAP=0

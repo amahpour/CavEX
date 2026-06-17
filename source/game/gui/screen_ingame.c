@@ -330,6 +330,9 @@ static void screen_ingame_update(struct screen* s, float dt) {
 
 	if(input_pressed(IB_INVENTORY))
 		screen_set(&screen_inventory);
+
+	if(input_pressed(IB_MAP))
+		screen_set(&screen_map);
 }
 
 static void screen_ingame_render2D(struct screen* s, int width, int height) {
