@@ -59,6 +59,7 @@ LEVEL_NAME = os.environ.get("CAVEX_LEVEL_NAME", "Claude World")  # CAVEX_LEVEL_N
 WORLD_HEIGHT = int(os.environ.get("CAVEX_WORLD_HEIGHT", "256"))
 COL_BLOCKS = 16 * 16 * WORLD_HEIGHT      # bytes per chunk Blocks array (XZY, full height)
 COL_NIBBLES = COL_BLOCKS // 2            # bytes per Data/SkyLight/BlockLight (one nibble per cell)
+GAME_MODE = int(os.environ.get("CAVEX_GAMEMODE", "0"))  # 0 = survival (default), 1 = creative; written to Player.gameMode
 BASE_Y = 62          # baseline surface height (sea-level-ish)
 SNOW_LINE = 90       # ground at/above this y gets a snow surface
 CELL = 24            # value-noise lattice spacing in blocks
@@ -412,6 +413,7 @@ def write_level_dat(path, disk_size):
     player = t_compound("Player", [
         t_short("Health", 20),
         t_int("Dimension", 0),
+        t_byte("gameMode", GAME_MODE),  # 0 survival / 1 creative (issue #21); CavEX reads .Data.Player.gameMode
         t_list("Pos", 6, [p_double(v) for v in SPAWN]),
         t_list("Rotation", 5, [p_float(float(h(SPAWN_X, SPAWN_Z, 0, 99) % 360)), p_float(15.0)]),
         t_list("Motion", 6, [p_double(0.0)] * 3),

@@ -23,6 +23,7 @@
 		"gui_click": [4, 204],
 		"gui_click_alt": [5, 205],
 		"screenshot": [],
-		"map": [207]
+		"map": [207],
+		"toggle_creative": []
 	}
 }

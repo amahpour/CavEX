@@ -1,0 +1,63 @@
+# CavEX demo-replay script -- creative mode (issue #21, capture rig issue #66)
+#
+# Format: `@<tick> NAME=0|1 ... LOOK=dx,dy`. State is HELD until a later
+# keyframe changes it; ticks are 20 Hz. LOOK is a per-tick rotation RATE.
+# Camera mapping (source/game/camera.c): ry (pitch) -= dy*2 each tick, with ry
+# clamped to [~0.5 deg (looking UP), ~180 deg (looking DOWN)]. So here:
+#   dy < 0 tilts the view DOWN (toward the ground); dy > 0 tilts it UP.
+#   dx > 0 pans right; dx < 0 pans left.
+# See source/platform/demo_input.h.
+#
+# What this demonstrates (continuous camera motion throughout -> smooth GIF):
+#   1. Toggle creative ON  -> the "CREATIVE" HUD line appears (top-left).
+#   2. Aim DOWN at the solid ground and HOLD MINE -> each block at the crosshair
+#      breaks in ONE hit (instant). The player digs straight down, one block per
+#      beat (250 ms creative cooldown), carving an obvious shaft. In survival
+#      these blocks take seconds each; here they pop immediately.
+#   3. PLACE a block (USE) from the full hotbar -> the held stack count never
+#      drops (creative does not consume items).
+# Drives the REAL input path (IB_TOGGLE_CREATIVE / IB_ACTION1 / IB_ACTION2).
+
+# Settle while tilting the view DOWN (dy<0) toward the ground. The spawn pitch is
+# ~15 deg; a sustained dy=-0.08 over these ticks rotates pitch down past level to
+# steeply down. These head frames are dropped by the capture's GIF_START.
+@0   LOOK=0.0,-0.08
+
+# Keep tilting down until we are looking steeply at the ground at our feet -- a
+# guaranteed-solid cell regardless of which way we spawned facing.
+@16  LOOK=0.0,-0.05
+
+# Settle the pitch (stop rotating) for a couple ticks just before the toggle so
+# the crosshair is parked on the ground.
+@26  LOOK=0.0,0.0
+
+# Toggle CREATIVE on (edge-triggered). Hold steady two ticks so the toggle and
+# the new "CREATIVE" HUD line read clearly.
+@30  TOGGLE_CREATIVE=1
+@32  TOGGLE_CREATIVE=0
+
+# Hold MINE while aiming down: creative instant-break pops the block under the
+# crosshair, the player drops into the hole, the next block becomes the target,
+# and so on -> a shaft is dug one instant hit at a time. A very slow yaw drift
+# keeps every frame unique (smooth) and reveals the shaft walls.
+@36  MINE=1 LOOK=0.04,0.0
+
+# Reverse the slow yaw drift, still mining straight down.
+@70  LOOK=-0.04,0.0
+
+# Ease to a gentle right drift, still mining.
+@100 LOOK=0.03,0.0
+
+# Stop mining. Tilt the view UP (dy>0) off the floor a touch to face a shaft
+# wall, then PLACE a block (USE). Watch the hotbar count -- it does NOT drop.
+@126 MINE=0 LOOK=0.0,0.07
+@134 PLACE=1 LOOK=-0.03,0.0
+@137 PLACE=0
+
+# Place again on the next beat (still drifting so frames stay unique).
+@142 PLACE=1 LOOK=0.03,0.0
+@145 PLACE=0
+
+# End while the camera is still drifting so the final frames are in motion.
+@152 LOOK=0.04,0.02
+@160 LOOK=-0.03,0.0

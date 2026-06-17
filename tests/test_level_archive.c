@@ -211,6 +211,55 @@ TEST(level_archive_write_player_rejects_origin) {
 	string_clear(world_dir);
 }
 
+// Appends a fresh `gameMode` TAG_BYTE child (value 0) to the Player compound so
+// the production read/write paths (which only touch existing nodes) can be
+// exercised. Mirrors the node-cloning approach used in
+// level_archive_write_inventory.
+static void add_gamemode_node(struct level_archive* la) {
+	nbt_node* player = nbt_find_by_path(la->data, ".Data.Player");
+	ASSERT(player && player->type == TAG_COMPOUND);
+
+	struct nbt_list* node = malloc(sizeof(struct nbt_list));
+	ASSERT(node);
+	node->data = nbt_clone(&(nbt_node) {
+		.type = TAG_BYTE,
+		.name = "gameMode",
+		.payload.tag_byte = 0,
+	});
+	ASSERT(node->data);
+
+	list_add_tail(&node->entry, &player->payload.tag_list->entry);
+}
+
+TEST(level_archive_gamemode_roundtrip) {
+	struct level_archive la = {0};
+	string_t world_dir;
+	int8_t gm = 123;
+
+	copy_fixture_world(world_dir);
+	ASSERT(level_archive_create(&la, world_dir));
+
+	// The fixture has no gameMode tag: a read must fail (callers treat this as
+	// survival) and a write must fail (no node to update).
+	ASSERT(!level_archive_read(&la, LEVEL_PLAYER_GAMEMODE, &gm, 0));
+	ASSERT(!level_archive_write(&la, LEVEL_PLAYER_GAMEMODE, &(int8_t) {1}));
+
+	// Once the tag exists (as in any gen_world.py save), the creative flag
+	// round-trips through the byte: write 1 -> read 1, write 0 -> read 0.
+	add_gamemode_node(&la);
+
+	ASSERT(level_archive_write(&la, LEVEL_PLAYER_GAMEMODE, &(int8_t) {1}));
+	ASSERT(level_archive_read(&la, LEVEL_PLAYER_GAMEMODE, &gm, 0));
+	ASSERT_EQ(gm, 1);
+
+	ASSERT(level_archive_write(&la, LEVEL_PLAYER_GAMEMODE, &(int8_t) {0}));
+	ASSERT(level_archive_read(&la, LEVEL_PLAYER_GAMEMODE, &gm, 0));
+	ASSERT_EQ(gm, 0);
+
+	level_archive_destroy(&la);
+	string_clear(world_dir);
+}
+
 const test_entry_t g_tests_level[] = {
 	{"level_archive_read_write_time", test_level_archive_read_write_time},
 	{"level_archive_read_level_name", test_level_archive_read_level_name},
@@ -220,6 +269,8 @@ const test_entry_t g_tests_level[] = {
 	 test_level_archive_inventory_roundtrip},
 	{"level_archive_write_player_rejects_origin",
 	 test_level_archive_write_player_rejects_origin},
+	{"level_archive_gamemode_roundtrip",
+	 test_level_archive_gamemode_roundtrip},
 };
 
 const size_t g_tests_level_count

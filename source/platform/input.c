@@ -519,6 +519,7 @@ static const char* input_config_translate(enum input_button key) {
 		case IB_GUI_CLICK_ALT: return "input.gui_click_alt";
 		case IB_SCREENSHOT: return "input.screenshot";
 		case IB_MAP: return "input.map";
+		case IB_TOGGLE_CREATIVE: return "input.toggle_creative";
 		default: return NULL;
 	}
 }
@@ -559,8 +560,18 @@ bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 
 bool input_pressed(enum input_button b) {
 #ifdef PLATFORM_PC
-	if(input_virtual_src)
-		return input_virtual_cur[b] && !input_virtual_prev[b];
+	if(input_virtual_src) {
+		// The virtual source latches its button levels per 20 Hz tick, but
+		// input_pressed() consumers (e.g. the in-game screen update) run once
+		// per FRAME. Without consuming the edge, a single scripted press would
+		// read true on every frame of that tick and fire the action many times
+		// (e.g. toggling creative on/off repeatedly). Report the rising edge
+		// once, then clear it (re-armed by the next input_virtual_step_tick).
+		bool edge = input_virtual_cur[b] && !input_virtual_prev[b];
+		if(edge)
+			input_virtual_prev[b] = input_virtual_cur[b];
+		return edge;
+	}
 #endif
 
 	const char* key = input_config_translate(b);
@@ -595,8 +606,15 @@ bool input_pressed(enum input_button b) {
 
 bool input_released(enum input_button b) {
 #ifdef PLATFORM_PC
-	if(input_virtual_src)
-		return !input_virtual_cur[b] && input_virtual_prev[b];
+	if(input_virtual_src) {
+		// Same per-frame edge-consumption as input_pressed(): report the
+		// falling edge once per tick, then clear it so a frame-rate consumer
+		// does not see the release repeatedly within the same tick.
+		bool edge = !input_virtual_cur[b] && input_virtual_prev[b];
+		if(edge)
+			input_virtual_prev[b] = input_virtual_cur[b];
+		return edge;
+	}
 #endif
 
 	const char* key = input_config_translate(b);

@@ -41,6 +41,10 @@ struct server_local {
 		enum world_dim dimension;
 		bool has_pos;
 		bool finished_loading;
+		// Server-authoritative creative flag (persisted via Player.gameMode).
+		// Gates instant-break and item consumption; mirrored to the client for
+		// the HUD + dig-timer feel. Survival (false) is the default.
+		bool creative;
 		struct inventory inventory;
 		struct inventory* active_inventory;
 	} player;

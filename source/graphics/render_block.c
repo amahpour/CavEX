@@ -1486,7 +1486,16 @@ static uint8_t block_cracks_texture(struct block_info* this, enum side side) {
 	struct item_data it;
 	inventory_get_hotbar_item(
 		windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), &it);
-	int delay = tool_dig_delay_ms(blocks[this->block->type], item_get(&it));
+	bool creative = gstate.local_player
+		&& gstate.local_player->data.local_player.creative;
+	int delay = tool_dig_delay_ms(blocks[this->block->type], item_get(&it),
+								  creative);
+
+	// Creative breaks are instant (delay == 0); show the final crack stage and
+	// avoid the divide-by-zero in the survival progress math below.
+	if(delay <= 0)
+		return tex_atlas_lookup(TEXAT_BREAK_0 + 9);
+
 	int dt = time_diff_ms(gstate.digging.start, time_get()) / (delay / 10);
 
 	if(dt >= 9)

@@ -312,6 +312,7 @@ void entity_local_player(uint32_t id, struct entity* e, struct world* w) {
 	entity_default_init(e, false, w);
 	e->data.local_player.jump_ticks = 0;
 	e->data.local_player.flying = false;
+	e->data.local_player.creative = false; // updated by CRPC_GAMEMODE on load
 	e->data.local_player.jump_tap_window = 0;
 	e->data.local_player.jump_held_prev = false;
 }
