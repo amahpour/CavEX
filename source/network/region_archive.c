@@ -21,11 +21,19 @@
 #include <m-lib/m-string.h>
 
 #include "../cNBT/nbt.h"
+#include "../util.h"
 
 #include "region_archive.h"
 #include "server_world.h"
 
 #define CHUNK_EXISTS(offset, sectors) ((offset) >= 2 && (sectors) >= 1)
+
+// Beta 1.7.3 / McRegion height of every save written before issue #26 bumped
+// the PC engine to a taller world. Chunk block/light/data NBT arrays are laid
+// out XZY with a per-column stride equal to the world height, so a save written
+// at this height has Blocks = CHUNK_SIZE*CHUNK_SIZE*LEGACY_WORLD_HEIGHT bytes
+// (and the nibble arrays at half that). See region_archive_migrate_legacy().
+#define LEGACY_WORLD_HEIGHT 128
 
 static uint32_t conv_u32_native(uint8_t* data) {
 	return (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
@@ -205,6 +213,81 @@ bool region_archive_contains(struct region_archive* ra, w_coord_t x,
 	return true;
 }
 
+// Load-time migration for saves written before issue #26 raised WORLD_HEIGHT.
+//
+// A LEGACY_WORLD_HEIGHT-tall chunk stores its Blocks/Data/Light arrays XZY with
+// a per-column stride of LEGACY_WORLD_HEIGHT; the running engine expects a
+// stride of WORLD_HEIGHT. This rebuilds each of the CHUNK_SIZE*CHUNK_SIZE
+// columns into freshly allocated WORLD_HEIGHT-tall arrays:
+//   - the bottom LEGACY_WORLD_HEIGHT cells are copied verbatim,
+//   - the new cells above are AIR (0) for blocks/metadata/block-light,
+//   - the new cells above are full sky (0xF) for sky-light so the freshly
+//     exposed upper world is not pitch black,
+//   - HeightMap is one byte per column and is height-independent, so it is
+//     copied unchanged.
+// On success the borrowed legacy arrays are freed and *sc points at the new
+// WORLD_HEIGHT-tall arrays. The chunk is flagged modified so it is rewritten in
+// the current (taller) layout on the next save, completing the upgrade on disk.
+//
+// Returns false (leaving *sc untouched, caller still owns the legacy arrays) on
+// allocation failure.
+static bool region_archive_migrate_legacy(struct server_chunk* sc) {
+	assert(sc && sc->ids && sc->metadata && sc->lighting_sky
+		   && sc->lighting_torch && sc->heightmap);
+
+	const size_t columns = CHUNK_SIZE * CHUNK_SIZE;
+	const size_t new_blocks = columns * WORLD_HEIGHT;
+	const size_t new_nibbles = new_blocks / 2;
+
+	uint8_t* ids = calloc(1, new_blocks);
+	uint8_t* metadata = calloc(1, new_nibbles);
+	uint8_t* lighting_sky = calloc(1, new_nibbles);
+	uint8_t* lighting_torch = calloc(1, new_nibbles);
+
+	if(!ids || !metadata || !lighting_sky || !lighting_torch) {
+		free(ids);
+		free(metadata);
+		free(lighting_sky);
+		free(lighting_torch);
+		return false;
+	}
+
+	for(size_t c = 0; c < columns; c++) {
+		size_t old_base = c * LEGACY_WORLD_HEIGHT;
+		size_t new_base = c * WORLD_HEIGHT;
+
+		for(size_t y = 0; y < LEGACY_WORLD_HEIGHT; y++) {
+			ids[new_base + y] = sc->ids[old_base + y];
+			nibble_write(metadata, new_base + y,
+						 nibble_read(sc->metadata, old_base + y));
+			nibble_write(lighting_sky, new_base + y,
+						 nibble_read(sc->lighting_sky, old_base + y));
+			nibble_write(lighting_torch, new_base + y,
+						 nibble_read(sc->lighting_torch, old_base + y));
+		}
+
+		// calloc already zeroed blocks/metadata/torch-light above the legacy
+		// ceiling; the newly exposed cells need full sky light so the upper
+		// world renders lit rather than black.
+		for(size_t y = LEGACY_WORLD_HEIGHT; y < WORLD_HEIGHT; y++)
+			nibble_write(lighting_sky, new_base + y, 0xF);
+	}
+
+	free(sc->ids);
+	free(sc->metadata);
+	free(sc->lighting_sky);
+	free(sc->lighting_torch);
+
+	sc->ids = ids;
+	sc->metadata = metadata;
+	sc->lighting_sky = lighting_sky;
+	sc->lighting_torch = lighting_torch;
+	// heightmap is one byte per column, height-independent; keep as-is.
+	sc->modified = true;
+
+	return true;
+}
+
 bool region_archive_get_blocks(struct region_archive* ra, w_coord_t x,
 							   w_coord_t z, struct server_chunk* sc) {
 	assert(ra && sc);
@@ -281,15 +364,29 @@ bool region_archive_get_blocks(struct region_archive* ra, w_coord_t x,
 	if(!n_blocks || !n_metadata || !n_skyl || !n_torchl || !n_height
 	   || n_blocks->type != TAG_BYTE_ARRAY || n_metadata->type != TAG_BYTE_ARRAY
 	   || n_skyl->type != TAG_BYTE_ARRAY || n_torchl->type != TAG_BYTE_ARRAY
-	   || n_height->type != TAG_BYTE_ARRAY
-	   || n_blocks->payload.tag_byte_array.length
-		   != CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT
+	   || n_height->type != TAG_BYTE_ARRAY) {
+		nbt_free(chunk);
+		return false;
+	}
+
+	// Accept the current WORLD_HEIGHT layout and, when the engine is taller
+	// than the original world (issue #26 bumped PC to 256), the LEGACY_WORLD_HEIGHT
+	// layout too. Both Blocks and the three nibble arrays must agree on one of
+	// those two heights; HeightMap is always one byte per column.
+	int32_t blocks_len = n_blocks->payload.tag_byte_array.length;
+	int height = (blocks_len == CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT) ?
+		WORLD_HEIGHT :
+		(blocks_len == CHUNK_SIZE * CHUNK_SIZE * LEGACY_WORLD_HEIGHT) ?
+		LEGACY_WORLD_HEIGHT :
+		0;
+
+	if(height == 0
 	   || n_metadata->payload.tag_byte_array.length
-		   != CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT / 2
+		   != CHUNK_SIZE * CHUNK_SIZE * height / 2
 	   || n_skyl->payload.tag_byte_array.length
-		   != CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT / 2
+		   != CHUNK_SIZE * CHUNK_SIZE * height / 2
 	   || n_torchl->payload.tag_byte_array.length
-		   != CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT / 2
+		   != CHUNK_SIZE * CHUNK_SIZE * height / 2
 	   || n_height->payload.tag_byte_array.length != CHUNK_SIZE * CHUNK_SIZE) {
 		nbt_free(chunk);
 		return false;
@@ -310,6 +407,23 @@ bool region_archive_get_blocks(struct region_archive* ra, w_coord_t x,
 	sc->heightmap = n_height->payload.tag_byte_array.data;
 
 	nbt_free(chunk);
+
+	// A legacy-height chunk uses a shorter per-column stride than the running
+	// engine; rebuild it into the current WORLD_HEIGHT layout in memory. (When
+	// WORLD_HEIGHT == LEGACY_WORLD_HEIGHT, e.g. the Wii build, this branch is
+	// never taken and the arrays are already native.)
+	if(height != WORLD_HEIGHT) {
+		if(!region_archive_migrate_legacy(sc)) {
+			// migration left the borrowed legacy arrays in place; free them so
+			// the failed load leaks nothing.
+			free(sc->ids);
+			free(sc->metadata);
+			free(sc->lighting_sky);
+			free(sc->lighting_torch);
+			free(sc->heightmap);
+			return false;
+		}
+	}
 
 	return true;
 }
