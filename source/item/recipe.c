@@ -592,6 +592,23 @@ void recipe_init() {
 		(struct item_data) {.id = BLOCK_PLANKS, .durability = 0, .count = 4}, 1,
 		1, (uint8_t[]) {1}, (struct item_data) {.id = BLOCK_LOG}, false);
 
+	// decorative blocks (issue #29) — reuse existing tiles, all craftable
+	recipe_add(recipes_crafting,
+			   (struct item_data) {
+				   .id = BLOCK_SMOOTH_STONE, .durability = 0, .count = 4},
+			   2, 2, (uint8_t[]) {1, 1, 1, 1},
+			   (struct item_data) {.id = BLOCK_STONE}, false);
+	recipe_add(recipes_crafting,
+			   (struct item_data) {
+				   .id = BLOCK_SMOOTH_SANDSTONE, .durability = 0, .count = 4},
+			   2, 2, (uint8_t[]) {1, 1, 1, 1},
+			   (struct item_data) {.id = BLOCK_SANDSTONE}, false);
+	recipe_add(recipes_crafting,
+			   (struct item_data) {
+				   .id = BLOCK_OAK_WOOD, .durability = 0, .count = 3},
+			   2, 2, (uint8_t[]) {1, 1, 1, 1},
+			   (struct item_data) {.id = BLOCK_LOG}, false);
+
 	add_tools();
 	add_armor();
 }

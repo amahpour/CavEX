@@ -7,6 +7,9 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/block/blocks_util.c
 	${CMAKE_SOURCE_DIR}/source/block/block_bubble_column.c
 	${CMAKE_SOURCE_DIR}/source/block/block_candle.c
+	${CMAKE_SOURCE_DIR}/source/block/block_smooth_stone.c
+	${CMAKE_SOURCE_DIR}/source/block/block_smooth_sandstone.c
+	${CMAKE_SOURCE_DIR}/source/block/block_oak_wood.c
 	${CMAKE_SOURCE_DIR}/source/block/face_occlusion.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/buffer.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/nbt_parsing.c

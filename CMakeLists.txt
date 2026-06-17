@@ -62,6 +62,7 @@ add_executable(cavex
 				source/block/block_log.c
 				source/block/block_netherrack.c
 				source/block/block_noteblock.c
+				source/block/block_oak_wood.c
 				source/block/block_obsidian.c
 				source/block/block_ore.c
 				source/block/block_planks.c
@@ -78,6 +79,8 @@ add_executable(cavex
 				source/block/blocks.c
 				source/block/blocks_util.c
 				source/block/block_slab.c
+				source/block/block_smooth_sandstone.c
+				source/block/block_smooth_stone.c
 				source/block/block_snow.c
 				source/block/block_spawner.c
 				source/block/block_sponge.c

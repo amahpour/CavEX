@@ -129,6 +129,9 @@ void blocks_init() {
 	blocks[96] = &block_trapdoor;
 	blocks[97] = &block_candle;
 	blocks[98] = &block_bubble_column;
+	blocks[99] = &block_smooth_stone;
+	blocks[100] = &block_smooth_sandstone;
+	blocks[101] = &block_oak_wood;
 
 	for(int k = 0; k < 256; k++) {
 		if(blocks[k]) {

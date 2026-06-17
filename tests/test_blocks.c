@@ -116,12 +116,63 @@ TEST(candle_block_registered) {
 	blocks[BLOCK_CANDLE] = NULL;
 }
 
+TEST(decorative_blocks_registered) {
+	// The decorative blocks (issue #29) are registration-only full cubes that
+	// reuse existing terrain.png tiles. blocks_init() is GX/graphics-bound and
+	// is not linked into the test harness, so register the real structs into
+	// the stub registry the same way blocks_init() does, then exercise their
+	// accessors (acceptance: blocks[id] != NULL, name set, a real in-atlas
+	// texture, drops itself).
+	struct {
+		enum block_type id;
+		struct block* def;
+		const char* name;
+		enum block_material material;
+	} expected[] = {
+		{BLOCK_SMOOTH_STONE, &block_smooth_stone, "Smooth Stone",
+		 MATERIAL_STONE},
+		{BLOCK_SMOOTH_SANDSTONE, &block_smooth_sandstone, "Smooth Sandstone",
+		 MATERIAL_STONE},
+		{BLOCK_OAK_WOOD, &block_oak_wood, "Oak Wood", MATERIAL_WOOD},
+	};
+
+	for(size_t k = 0; k < sizeof(expected) / sizeof(expected[0]); k++) {
+		blocks[expected[k].id] = expected[k].def;
+
+		struct block* b = blocks[expected[k].id];
+		ASSERT_NE(b, NULL);
+		ASSERT(strcmp(b->name, expected[k].name) == 0);
+
+		struct block_data blk = {.type = expected[k].id};
+		struct block_info info = {.block = &blk};
+
+		ASSERT_EQ(b->getMaterial(&info), expected[k].material);
+
+		// a real, in-atlas tile index (never the missing/magenta tile)
+		ASSERT(b->getTextureIndex(&info, SIDE_TOP) < TEXAT_MAX);
+
+		// full cube: solid bounding box for both entity and ray/mesh queries
+		struct AABB box;
+		ASSERT_EQ(b->getBoundingBox(&info, true, &box), 1U);
+		ASSERT_EQ(b->getBoundingBox(&info, false, &box), 1U);
+
+		// drops itself (block_drop_default)
+		struct item_data drop = {0};
+		ASSERT_EQ(b->getDroppedItem(&info, &drop, NULL), 1U);
+		ASSERT_EQ(drop.id, (uint8_t)expected[k].id);
+		ASSERT_EQ(drop.count, 1U);
+
+		blocks[expected[k].id] = NULL;
+	}
+}
+
 const test_entry_t g_tests_blocks[] = {
 	{"blocks_side_helpers", test_blocks_side_helpers},
 	{"block_drop_default_item", test_block_drop_default_item},
 	{"blocks_all_sides", test_blocks_all_sides},
 	{"block_bubble_column_registered", test_block_bubble_column_registered},
 	{"candle_block_registered", test_candle_block_registered},
+	{"decorative_blocks_registered", test_decorative_blocks_registered},
 };
 
 const size_t g_tests_blocks_count
