@@ -55,6 +55,10 @@ static void particle_add(vec3 pos, vec3 vel, uint8_t tex) {
 	}
 }
 
+void particle_spawn(vec3 pos, vec3 vel, uint8_t tex) {
+	particle_add(pos, vel, tex);
+}
+
 void particle_generate_block(struct block_info* info) {
 	assert(info && info->block && info->neighbours);
 

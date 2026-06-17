@@ -304,6 +304,22 @@ static void server_local_process(struct server_rpc* call, void* user) {
 							= s->player.inventory
 								  .items[slot + INVENTORY_SLOT_HOTBAR],
 						});
+					} else if(it && it->onItemUse
+							  && it->onItemUse(s, &it_data)) {
+						size_t slot
+							= inventory_get_hotbar(&s->player.inventory);
+						inventory_consume(&s->player.inventory,
+										  slot + INVENTORY_SLOT_HOTBAR);
+
+						clin_rpc_send(&(struct client_rpc) {
+							.type = CRPC_INVENTORY_SLOT,
+							.payload.inventory_slot.window = WINDOWC_INVENTORY,
+							.payload.inventory_slot.slot
+							= slot + INVENTORY_SLOT_HOTBAR,
+							.payload.inventory_slot.item
+							= s->player.inventory
+								  .items[slot + INVENTORY_SLOT_HOTBAR],
+						});
 					}
 				}
 			}

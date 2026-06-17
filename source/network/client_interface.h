@@ -40,6 +40,7 @@ enum client_rpc_type {
 	CRPC_ENTITY_DESTROY,
 	CRPC_ENTITY_MOVE,
 	CRPC_OPEN_WINDOW,
+	CRPC_PARTICLE_BURST,
 };
 
 struct client_rpc {
@@ -100,6 +101,11 @@ struct client_rpc {
 			uint32_t entity_id;
 			vec3 pos;
 		} entity_move;
+		struct {
+			vec3 pos;
+			uint16_t count;
+			uint8_t tex;
+		} particle_burst;
 	} payload;
 };
 

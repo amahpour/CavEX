@@ -21,6 +21,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/parson/parson.c
 	${CMAKE_SOURCE_DIR}/source/lighting.c
 	${CMAKE_SOURCE_DIR}/source/item/recipe.c
+	${CMAKE_SOURCE_DIR}/source/item/items/item_firework.c
 	${CMAKE_SOURCE_DIR}/source/item/tool.c
 	${CMAKE_SOURCE_DIR}/source/item/inventory.c
 	${CMAKE_SOURCE_DIR}/source/item/window_container.c
@@ -85,6 +86,7 @@ add_executable(cavex_tests
 	test_window.c
 	test_level_archive.c
 	test_region.c
+	test_firework.c
 )
 
 target_include_directories(cavex_tests PRIVATE
