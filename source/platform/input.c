@@ -520,6 +520,7 @@ static const char* input_config_translate(enum input_button key) {
 		case IB_SCREENSHOT: return "input.screenshot";
 		case IB_MAP: return "input.map";
 		case IB_TOGGLE_CREATIVE: return "input.toggle_creative";
+		case IB_CREATIVE_PAGE: return "input.creative_page";
 		default: return NULL;
 	}
 }

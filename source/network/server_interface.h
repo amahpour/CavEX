@@ -34,6 +34,7 @@ enum server_rpc_type {
 	SRPC_WINDOW_CLICK,
 	SRPC_WINDOW_CLOSE,
 	SRPC_SET_GAMEMODE,
+	SRPC_CREATIVE_PICK_BLOCK,
 };
 
 struct server_rpc {
@@ -73,6 +74,12 @@ struct server_rpc {
 			// false -> just request the current state be (re)sent
 			bool toggle;
 		} set_gamemode;
+		struct {
+			// Block id (1..255) the creative inventory wants a full stack of in
+			// the currently selected hotbar slot. Honoured only while the
+			// server's creative flag is set.
+			uint16_t block_id;
+		} creative_pick_block;
 	} payload;
 };
 

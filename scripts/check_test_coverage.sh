@@ -55,6 +55,7 @@ OBJECTS=(
 	"__/source/platform/demo_input.c.o"
 	"__/source/game/state_export.c.o"
 	"__/source/game/gui/map_projection.c.o"
+	"__/source/game/gui/creative_inventory_list.c.o"
 )
 
 if [[ ! -x "$TEST_BIN" ]]; then

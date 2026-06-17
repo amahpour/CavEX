@@ -44,6 +44,10 @@ enum input_button {
 	IB_SCREENSHOT,
 	IB_MAP,
 	IB_TOGGLE_CREATIVE,
+	// Advance the creative inventory to the next page (wraps). Lets the
+	// all-blocks grid be paged from the keyboard so the demo rig can show every
+	// page; ignored outside the creative inventory screen.
+	IB_CREATIVE_PAGE,
 	IB_COUNT,
 };
 

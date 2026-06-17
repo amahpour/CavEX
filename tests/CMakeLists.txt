@@ -34,6 +34,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/platform/demo_input.c
 	${CMAKE_SOURCE_DIR}/source/game/state_export.c
 	${CMAKE_SOURCE_DIR}/source/game/gui/map_projection.c
+	${CMAKE_SOURCE_DIR}/source/game/gui/creative_inventory_list.c
 	stubs/chunk_link_stub.c
 	stubs/game_state_stub.c
 	stubs/blocks_stub.c
@@ -83,6 +84,7 @@ add_executable(cavex_tests
 	test_demo.c
 	test_state_export.c
 	test_map.c
+	test_creative_inventory.c
 	test_chunk.c
 	test_inventory.c
 	test_window.c

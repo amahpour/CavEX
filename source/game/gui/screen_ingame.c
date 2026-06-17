@@ -370,7 +370,10 @@ static void screen_ingame_update(struct screen* s, float dt) {
 		});
 
 	if(input_pressed(IB_INVENTORY))
-		screen_set(&screen_inventory);
+		// In creative the inventory key opens the all-blocks pick-any grid;
+		// survival opens the normal inventory (unchanged). Gated on the
+		// client-mirrored creative flag from #64.
+		screen_set(creative ? &screen_creative_inventory : &screen_inventory);
 
 	if(input_pressed(IB_MAP))
 		screen_set(&screen_map);

@@ -342,6 +342,33 @@ static void server_local_process(struct server_rpc* call, void* user) {
 				});
 			}
 			break;
+		case SRPC_CREATIVE_PICK_BLOCK: {
+			// Server-authoritative creative pick: drop a full stack of the
+			// requested block into the selected hotbar slot, then echo the slot
+			// so the client inventory mirrors it (same path normal pickups use).
+			// Gated on the creative flag here too -- a survival client could
+			// never send this, but the authority must not trust that.
+			uint16_t id = call->payload.creative_pick_block.block_id;
+			if(s->player.has_pos && s->player.creative && id > 0 && id < 256
+			   && blocks[id] && blocks[id]->block_item.renderItem) {
+				size_t slot = inventory_get_hotbar(&s->player.inventory)
+					+ INVENTORY_SLOT_HOTBAR;
+				struct item_data stack = {
+					.id = id,
+					.durability = 0,
+					.count = blocks[id]->block_item.max_stack,
+				};
+				inventory_set_slot(&s->player.inventory, slot, stack);
+
+				clin_rpc_send(&(struct client_rpc) {
+					.type = CRPC_INVENTORY_SLOT,
+					.payload.inventory_slot.window = WINDOWC_INVENTORY,
+					.payload.inventory_slot.slot = slot,
+					.payload.inventory_slot.item = stack,
+				});
+			}
+			break;
+		}
 		case SRPC_UNLOAD_WORLD:
 			// save chunks here, then destroy all
 			clin_rpc_send(&(struct client_rpc) {
