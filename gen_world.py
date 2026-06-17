@@ -5,8 +5,14 @@ Pure stdlib. Produces:
   out/world/level.dat          gzipped NBT, fields CavEX's level_archive.c reads
   out/world/region/r.0.0.mcr   1024 flat-grass chunks, zlib-compressed NBT
 
-Beta block array order: index = y + z*128 + x*128*16  (XZY)
+Beta block array order: index = y + z*WORLD_HEIGHT + x*WORLD_HEIGHT*16  (XZY)
 Nibble arrays (Data/SkyLight/BlockLight): even index -> low nibble.
+
+WORLD_HEIGHT must match the engine's source/world.h WORLD_HEIGHT for the build
+this world is staged for: the region's Blocks/Data/Light NBT arrays are sized
+16*16*WORLD_HEIGHT (and /2 for the nibble arrays). The PC build is 256-tall
+(issue #26); the Wii build stays 128-tall. Worlds are therefore NOT portable
+between the two heights. Override with CAVEX_WORLD_HEIGHT for a Wii (128) gen.
 """
 import gzip, os, struct, sys, time, zlib
 from functools import lru_cache
@@ -47,8 +53,13 @@ DIAMOND_ORE = 56
 REDSTONE_ORE = 73
 SEED = int(os.environ.get("CAVEX_SEED", "42"))   # CAVEX_SEED overrides; terrain + strata + RandomSeed all derive from it
 LEVEL_NAME = os.environ.get("CAVEX_LEVEL_NAME", "Claude World")  # CAVEX_LEVEL_NAME overrides the world-list name
+# Column height in blocks. MUST equal the target build's source/world.h
+# WORLD_HEIGHT (PC=256, Wii=128). Set CAVEX_WORLD_HEIGHT=128 to gen for the Wii.
+WORLD_HEIGHT = int(os.environ.get("CAVEX_WORLD_HEIGHT", "256"))
+COL_BLOCKS = 16 * 16 * WORLD_HEIGHT      # bytes per chunk Blocks array (XZY, full height)
+COL_NIBBLES = COL_BLOCKS // 2            # bytes per Data/SkyLight/BlockLight (one nibble per cell)
 BASE_Y = 62          # baseline surface height (sea-level-ish)
-SNOW_LINE = 90       # ground at/above this y gets a snow surface (128-cap world)
+SNOW_LINE = 90       # ground at/above this y gets a snow surface
 CELL = 24            # value-noise lattice spacing in blocks
 
 def h(wx, wz, y, salt):
@@ -140,7 +151,9 @@ def _value_noise(wx, wz, cell):
 @lru_cache(maxsize=None)
 def surface_y(wx, wz):
     """Deterministic surface height: rolling hills + sparser, taller peaks.
-    Bounded to BASE_Y..~100 and hard-capped < 124 to stay under the 128 format cap."""
+    Bounded to BASE_Y..~100 and hard-capped at 122 (terrain-shape choice; well
+    under WORLD_HEIGHT). The taller PC world (#26) keeps the same natural relief
+    — extra headroom above is for player builds, not bigger natural mountains."""
     hills = _value_noise(wx, wz, CELL)            # broad relief
     peaks = _value_noise(wx, wz, CELL * 3)        # rarer big features
     h = BASE_Y + hills * 22.0                     # ~62..84
@@ -209,16 +222,16 @@ SPAWN_Y = SPAWN_FEET                                  # integer respawn cell for
 SPAWN = (SPAWN_X + 0.5, SPAWN_FEET + 0.38 + EYE_HEIGHT, SPAWN_Z + 0.5)  # eye pos; feet ~0.38 above ground
 
 def build_chunk(cx, cz):
-    blocks = bytearray(32768)
-    data   = bytearray(16384)          # all 0
-    skyl   = bytearray(16384)
-    blockl = bytearray(16384)          # all 0
+    blocks = bytearray(COL_BLOCKS)
+    data   = bytearray(COL_NIBBLES)    # all 0
+    skyl   = bytearray(COL_NIBBLES)
+    blockl = bytearray(COL_NIBBLES)    # all 0
     hmap   = bytearray(256)
 
     for x in range(16):
         for z in range(16):
             wx, wz = cx * 16 + x, cz * 16 + z
-            base = (x * 16 + z) * 128       # x*128*16 + z*128
+            base = (x * 16 + z) * WORLD_HEIGHT   # x*H*16 + z*H
             surf = surface_y(wx, wz)        # per-column surface height (relief)
             # Layered sub-surface: bedrock floor, stone body, ores + fluid pockets
             # (deterministic from SEED via strata_block()), up to the surface.
@@ -227,14 +240,14 @@ def build_chunk(cx, cz):
             blocks[base + surf] = surface_block(surf)   # snow on high ground, else grass
             top = surf
             for (y, bid) in column_blocks(wx, wz, surf):
-                if 0 <= y < 128:
+                if 0 <= y < WORLD_HEIGHT:
                     if bid == LEAVES and blocks[base + y] != AIR:
                         continue            # don't bury terrain under floating leaves
                     blocks[base + y] = bid
                     top = max(top, y)
             hmap[z * 16 + x] = top + 1
             # full skylight above (and at) the surface
-            for y in range(top + 1, 128):
+            for y in range(top + 1, WORLD_HEIGHT):
                 idx = base + y
                 if idx & 1: skyl[idx >> 1] |= 0xF0
                 else:       skyl[idx >> 1] |= 0x0F
@@ -323,8 +336,8 @@ def main():
     def column_top(chunk, x_in, z_in):
         """topmost non-air block y in a column of a parsed chunk."""
         bi = chunk.find(b"Blocks") + len("Blocks") + 4
-        col = bi + (x_in * 16 + z_in) * 128
-        for y in range(127, -1, -1):
+        col = bi + (x_in * 16 + z_in) * WORLD_HEIGHT
+        for y in range(WORLD_HEIGHT - 1, -1, -1):
             if chunk[col + y] != AIR:
                 return y, chunk[col + y]
         return 0, AIR
@@ -337,16 +350,16 @@ def main():
     # track the absolute top non-air block (landmark stacks included).
     heights = set()      # distinct grass/snow surface heights (relief)
     snow_cols = 0        # columns whose surface block is snow
-    region_max = 0       # highest non-air block anywhere (must stay < 128)
+    region_max = 0       # highest non-air block anywhere (must stay < WORLD_HEIGHT)
     for cz in range(32):
         for cx in range(32):
             ch = read_chunk(cx, cz)
             bi = ch.find(b"Blocks") + len("Blocks") + 4
             for x_in in range(16):
                 for z_in in range(16):
-                    col = bi + (x_in * 16 + z_in) * 128
+                    col = bi + (x_in * 16 + z_in) * WORLD_HEIGHT
                     surf_seen = False
-                    for y in range(127, -1, -1):
+                    for y in range(WORLD_HEIGHT - 1, -1, -1):
                         b = ch[col + y]
                         if b == AIR:
                             continue
@@ -366,8 +379,9 @@ def main():
     # (2) at least one snow-capped column at/above the snow line
     assert snow_cols >= 1, "no snow-capped columns found"
     assert max(heights) >= SNOW_LINE, f"no ground reaches the snow line (max {max(heights)})"
-    # (3) the 128 cap holds for the whole region (incl. landmark stacks)
-    assert region_max < 128, f"a column exceeds the 128 cap (max y {region_max})"
+    # (3) the height cap holds for the whole region (incl. landmark stacks)
+    assert region_max < WORLD_HEIGHT, \
+        f"a column exceeds the {WORLD_HEIGHT} cap (max y {region_max})"
 
     # (4) spawn is safe: solid surface, 2 air blocks of head clearance, and the
     # player's FEET (Pos.y - EYE_HEIGHT) land just above the surface block top.
@@ -375,7 +389,7 @@ def main():
     assert sb in (GRASS, SNOW, STONE, DIRT), f"spawn surface not solid ground (block {sb})"
     assert sy == SPAWN_SURFACE, f"spawn surface y {sy} != computed {SPAWN_SURFACE}"
     bi = spawn_chunk.find(b"Blocks") + len("Blocks") + 4
-    col = ((24 % 16) * 16 + (24 % 16)) * 128
+    col = ((24 % 16) * 16 + (24 % 16)) * WORLD_HEIGHT
     assert spawn_chunk[bi + col + sy + 1] == AIR and spawn_chunk[bi + col + sy + 2] == AIR, \
         "spawn column lacks 2 blocks of head clearance"
     assert SPAWN_Y == sy + 1, f"SpawnY {SPAWN_Y} not just above surface {sy}"
@@ -385,13 +399,13 @@ def main():
 
     # (5) strata present: bedrock floor + ores + fluid pockets (from strata_block)
     sbi = spawn_chunk.find(b"Blocks") + len("Blocks") + 4
-    spawn_blocks = spawn_chunk[sbi:sbi + 32768]
-    assert spawn_blocks[((24 % 16) * 16 + (24 % 16)) * 128 + 0] == BEDROCK, "bedrock missing at y=0"
+    spawn_blocks = spawn_chunk[sbi:sbi + COL_BLOCKS]
+    assert spawn_blocks[((24 % 16) * 16 + (24 % 16)) * WORLD_HEIGHT + 0] == BEDROCK, "bedrock missing at y=0"
     ore_ids = {COAL_ORE, IRON_ORE, GOLD_ORE, REDSTONE_ORE, LAPIS_ORE, DIAMOND_ORE}
     ores_found = ore_ids & set(spawn_blocks)
-    lava_low = any(spawn_blocks[c * 128 + y] == LAVA
+    lava_low = any(spawn_blocks[c * WORLD_HEIGHT + y] == LAVA
                    for c in range(256) for y in range(10))
-    water_mid = any(spawn_blocks[c * 128 + y] == WATER
+    water_mid = any(spawn_blocks[c * WORLD_HEIGHT + y] == WATER
                     for c in range(256) for y in range(12, 49))
     assert len(ores_found) >= 1, "no ore ids found in spawn chunk"
     assert lava_low, "no LAVA block at y<10 in spawn chunk"
@@ -399,7 +413,7 @@ def main():
 
     print(f"self-check OK: relief {min(heights)}..{max(heights)} "
           f"({len(heights)} heights), {snow_cols} snow column(s) >= y{SNOW_LINE}, "
-          f"region max y {region_max} < 128, spawn solid at y{sy} (SpawnY {SPAWN_Y}), "
+          f"region max y {region_max} < {WORLD_HEIGHT}, spawn solid at y{sy} (SpawnY {SPAWN_Y}), "
           f"strata ores {sorted(ores_found)} + lava/water, 'Claude World' preserved")
 
 if __name__ == "__main__":
