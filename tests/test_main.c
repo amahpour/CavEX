@@ -46,6 +46,9 @@ extern const size_t g_tests_tool_count;
 extern const test_entry_t g_tests_entity[];
 extern const size_t g_tests_entity_count;
 
+extern const test_entry_t g_tests_entity_tick[];
+extern const size_t g_tests_entity_tick_count;
+
 extern const test_entry_t g_tests_double_tap[];
 extern const size_t g_tests_double_tap_count;
 
@@ -89,8 +92,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[26];
-static const size_t group_count = 26;
+static test_group_t groups[27];
+static const size_t group_count = 27;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -123,6 +126,8 @@ static void init_groups(void) {
 								g_tests_region_migrate_count};
 	groups[25] = (test_group_t){g_tests_creative_inventory,
 								g_tests_creative_inventory_count};
+	groups[26]
+		= (test_group_t){g_tests_entity_tick, g_tests_entity_tick_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {

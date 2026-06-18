@@ -93,6 +93,21 @@ void entity_item(uint32_t id, struct entity* e, bool server, void* world,
 				 struct item_data it);
 
 uint32_t entity_gen_id(dict_entity_t dict);
+
+// Per-entity callback for entity_tick_all(). Invoked once for every entity in
+// the dict during a safe walk. Return true to mark the entity for removal; it
+// is erased only after the walk has finished. The callback may freely read and
+// mutate `e` and emit RPCs, but must NOT insert into or erase from `dict`.
+typedef bool (*entity_tick_fn)(uint32_t key, struct entity* e, void* ctx);
+
+// Tick every entity through `cb`, then erase the ones it marked for removal.
+// Two-pass (collect-then-erase): no entity is erased while the dict iterator is
+// still live. CavEX's dict is an open-addressing hash map that may resize and
+// relocate its buckets on erase, which would invalidate a live iterator and
+// trip M*LIB's `index != NULL` contract on the next access (issue #69).
+// Returns the number of entities removed.
+size_t entity_tick_all(dict_entity_t dict, entity_tick_fn cb, void* ctx);
+
 void entities_client_tick(dict_entity_t dict);
 void entities_client_render(dict_entity_t dict, struct camera* c,
 							float tick_delta);

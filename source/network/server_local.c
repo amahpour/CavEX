@@ -439,6 +439,34 @@ static void server_local_process(struct server_rpc* call, void* user) {
 	}
 }
 
+// Tick a single server entity and emit its MOVE/DESTROY RPC. Returns true if
+// the entity should be removed; entity_tick_all() defers the actual erase until
+// after the dict walk has finished (issue #69 — never erase mid-iteration).
+static bool server_local_tick_entity(uint32_t key, struct entity* e,
+									 void* ctx) {
+	struct server_local* s = ctx;
+
+	if(!e->tick_server)
+		return false;
+
+	bool remove = (e->delay_destroy == 0) || e->tick_server(e, s);
+
+	if(remove) {
+		clin_rpc_send(&(struct client_rpc) {
+			.type = CRPC_ENTITY_DESTROY,
+			.payload.entity_destroy.entity_id = key,
+		});
+	} else if(e->delay_destroy < 0) {
+		clin_rpc_send(&(struct client_rpc) {
+			.type = CRPC_ENTITY_MOVE,
+			.payload.entity_move.entity_id = key,
+			.payload.entity_move.pos = {e->pos[0], e->pos[1], e->pos[2]},
+		});
+	}
+
+	return remove;
+}
+
 static void server_local_update(struct server_local* s) {
 	assert(s);
 
@@ -449,36 +477,7 @@ static void server_local_update(struct server_local* s) {
 
 	s->world_time++;
 
-	dict_entity_it_t it;
-	dict_entity_it(it, s->entities);
-
-	while(!dict_entity_end_p(it)) {
-		uint32_t key = dict_entity_ref(it)->key;
-		struct entity* e = &dict_entity_ref(it)->value;
-
-		if(e->tick_server) {
-			bool remove = (e->delay_destroy == 0) || e->tick_server(e, s);
-			dict_entity_next(it);
-
-			if(remove) {
-				clin_rpc_send(&(struct client_rpc) {
-					.type = CRPC_ENTITY_DESTROY,
-					.payload.entity_destroy.entity_id = key,
-				});
-
-				dict_entity_erase(s->entities, key);
-			} else if(e->delay_destroy < 0) {
-				clin_rpc_send(&(struct client_rpc) {
-					.type = CRPC_ENTITY_MOVE,
-					.payload.entity_move.entity_id = key,
-					.payload.entity_move.pos
-					= {e->pos[0], e->pos[1], e->pos[2]},
-				});
-			}
-		} else {
-			dict_entity_next(it);
-		}
-	}
+	entity_tick_all(s->entities, server_local_tick_entity, s);
 
 	w_coord_t px = WCOORD_CHUNK_OFFSET(floor(s->player.x));
 	w_coord_t pz = WCOORD_CHUNK_OFFSET(floor(s->player.z));
