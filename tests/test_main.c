@@ -79,6 +79,9 @@ extern const size_t g_tests_state_export_count;
 extern const test_entry_t g_tests_firework[];
 extern const size_t g_tests_firework_count;
 
+extern const test_entry_t g_tests_creative_inventory[];
+extern const size_t g_tests_creative_inventory_count;
+
 const char* g_current_test = "";
 
 typedef struct {
@@ -86,8 +89,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[25];
-static const size_t group_count = 25;
+static test_group_t groups[26];
+static const size_t group_count = 26;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -118,6 +121,8 @@ static void init_groups(void) {
 	groups[23] = (test_group_t){g_tests_map, g_tests_map_count};
 	groups[24] = (test_group_t){g_tests_region_migrate,
 								g_tests_region_migrate_count};
+	groups[25] = (test_group_t){g_tests_creative_inventory,
+								g_tests_creative_inventory_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {

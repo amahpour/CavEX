@@ -24,6 +24,7 @@
 		"gui_click_alt": [5, 205],
 		"screenshot": [],
 		"map": [207],
-		"toggle_creative": []
+		"toggle_creative": [],
+		"creative_page": [8, 209, 212]
 	}
 }
