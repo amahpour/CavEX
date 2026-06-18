@@ -35,6 +35,7 @@ enum server_rpc_type {
 	SRPC_WINDOW_CLOSE,
 	SRPC_SET_GAMEMODE,
 	SRPC_CREATIVE_PICK_BLOCK,
+	SRPC_BOAT_CONTROL,
 };
 
 struct server_rpc {
@@ -80,6 +81,14 @@ struct server_rpc {
 			// server's creative flag is set.
 			uint16_t block_id;
 		} creative_pick_block;
+		struct {
+			// Server-authoritative boat control, sent each tick by the riding
+			// client. forward/turn are -1/0/+1; dismount clears the rider.
+			uint32_t entity_id;
+			int forward;
+			int turn;
+			bool dismount;
+		} boat_control;
 	} payload;
 };
 

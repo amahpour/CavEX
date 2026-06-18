@@ -58,6 +58,8 @@ struct server_local {
 void server_local_create(struct server_local* s);
 struct entity* server_local_spawn_item(vec3 pos, struct item_data* it,
 									   bool throw, struct server_local* s);
+struct entity* server_local_spawn_boat(vec3 pos, float yaw,
+									   struct server_local* s);
 void server_local_spawn_block_drops(struct server_local* s,
 									struct block_info* blk_info);
 void server_local_send_inv_changes(set_inv_slot_t changes,

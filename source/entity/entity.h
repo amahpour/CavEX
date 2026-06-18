@@ -29,6 +29,7 @@
 enum entity_type {
 	ENTITY_LOCAL_PLAYER,
 	ENTITY_ITEM,
+	ENTITY_BOAT,
 };
 
 struct server_local;
@@ -64,11 +65,22 @@ struct entity {
 			bool creative;
 			int jump_tap_window;
 			bool jump_held_prev;
+			// Entity id of the boat currently being ridden (0 = on foot). Set
+			// client-side when the player boards a boat; while non-zero the
+			// player tick steers the boat and rides along instead of walking.
+			uint32_t riding_boat_id;
 		} local_player;
 		struct entity_item {
 			struct item_data item;
 			int age;
 		} item;
+		struct entity_boat {
+			float yaw;			   // heading in radians (server-authoritative)
+			uint32_t passenger_id; // non-zero while a player is aboard
+			bool in_water;		   // set by the server tick (buoyancy state)
+			int control_forward;   // last steer intent -1/0/+1 (server only)
+			int control_turn;	   // last turn  intent -1/0/+1 (server only)
+		} boat;
 	} data;
 };
 
@@ -91,6 +103,26 @@ bool detect_double_tap(bool pressed, int* window);
 
 void entity_item(uint32_t id, struct entity* e, bool server, void* world,
 				 struct item_data it);
+
+// Rideable boat (issue #34). Same constructor shape as entity_item: wires the
+// tick/render/teleport callbacks and tags the entity ENTITY_BOAT.
+void entity_boat(uint32_t id, struct entity* e, bool server, void* world);
+
+// Boat hull dimensions (blocks) and physics tuning. Shared between the server
+// tick and the render so the collision box and drawn box agree.
+#define BOAT_WIDTH 1.0F
+#define BOAT_HEIGHT 0.5F
+#define BOAT_LENGTH 2.0F
+#define BOAT_TURN_SPEED 0.06F // yaw change (rad) per tick of turn input
+#define BOAT_ACCEL 0.04F	  // forward thrust per tick along the heading
+#define BOAT_DRAG 0.9F		  // fraction of horizontal speed kept per tick
+#define BOAT_BUOYANCY 0.04F	  // upward push per tick while submerged
+#define BOAT_GRAVITY 0.04F	  // downward pull per tick while airborne
+
+// Pure steering math: advance the heading by the turn input, add forward thrust
+// along the new heading into the x/z velocity, then apply horizontal drag.
+// forward/turn are each -1/0/+1. No engine state, so it is unit-testable.
+void entity_boat_steer(float* yaw, vec3 vel, int forward, int turn);
 
 uint32_t entity_gen_id(dict_entity_t dict);
 void entities_client_tick(dict_entity_t dict);

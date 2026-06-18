@@ -18,10 +18,17 @@
 */
 
 #include "../block/blocks_data.h"
+#include "../game/game_state.h"
+#include "../network/server_interface.h"
 #include "../platform/input.h"
 #include "entity.h"
 
 #define EYE_HEIGHT 1.62F
+
+// Boat riding (issue #34): how far above the hull centre the rider's eyes sit,
+// and how close the player's feet must be to a boat centre to board it.
+#define BOAT_RIDE_HEIGHT 1.0F
+#define BOAT_MOUNT_REACH 1.75F
 
 // Upward velocity imparted by a bubble column each tick. Small and clamped so
 // the player rises steadily without being launched through the ceiling.
@@ -84,8 +91,94 @@ static bool test_in_liquid(struct AABB* entity, struct block_info* blk_info) {
 	return test_in_water(entity, blk_info) || test_in_lava(entity, blk_info);
 }
 
+// Find a boat entity within boarding range of a feet position, or 0 if none.
+// Client-side: scans the shared entity dict (only a handful of entities exist).
+static uint32_t boat_in_reach(vec3 feet) {
+	dict_entity_it_t it;
+	dict_entity_it(it, gstate.entities);
+
+	while(!dict_entity_end_p(it)) {
+		struct entity* e = &dict_entity_ref(it)->value;
+		if(e->type == ENTITY_BOAT
+		   && glm_vec3_distance2(feet, e->pos) < glm_pow2(BOAT_MOUNT_REACH))
+			return e->id;
+		dict_entity_next(it);
+	}
+
+	return 0;
+}
+
 static bool entity_tick(struct entity* e) {
 	assert(e);
+
+	// --- Boat riding (issue #34) -----------------------------------------
+	// While mounted the player runs no physics of its own: it forwards steer
+	// input to the server-authoritative boat and rides along, snapping the
+	// camera onto the hull. Use/sneak dismounts. Kept as one bounded block so
+	// the rest of the player tick below is unchanged.
+	if(e->data.local_player.riding_boat_id) {
+		struct entity* boat
+			= dict_entity_get(gstate.entities,
+							  e->data.local_player.riding_boat_id);
+
+		if(boat && boat->type == ENTITY_BOAT) {
+			int forward = 0, turn = 0;
+			bool dismount = false;
+
+			if(e->data.local_player.capture_input) {
+				if(input_held(IB_FORWARD))
+					forward++;
+				if(input_held(IB_BACKWARD))
+					forward--;
+				if(input_held(IB_RIGHT))
+					turn++;
+				if(input_held(IB_LEFT))
+					turn--;
+				// Dismount on sneak only. Using the place/use button (IB_ACTION2)
+				// would also fire a block place on the Wii, where input_pressed()
+				// is level-per-poll and not consumed between the player tick and
+				// the in-game screen's place handler in the same frame.
+				dismount = input_pressed(IB_SNEAK);
+			}
+
+			svin_rpc_send(&(struct server_rpc) {
+				.type = SRPC_BOAT_CONTROL,
+				.payload.boat_control.entity_id = boat->id,
+				.payload.boat_control.forward = forward,
+				.payload.boat_control.turn = turn,
+				.payload.boat_control.dismount = dismount,
+			});
+
+			// ride along: eyes above the hull, interpolated like the boat
+			glm_vec3_copy(boat->pos_old, e->pos_old);
+			glm_vec3_copy(boat->pos, e->pos);
+			e->pos_old[1] += BOAT_RIDE_HEIGHT;
+			e->pos[1] += BOAT_RIDE_HEIGHT;
+
+			// keep the flight double-tap from arming on the dismount tap
+			e->data.local_player.jump_tap_window = 0;
+
+			if(dismount)
+				e->data.local_player.riding_boat_id = 0;
+
+			return false;
+		}
+
+		// boat vanished -> resume normal movement this tick
+		e->data.local_player.riding_boat_id = 0;
+	}
+
+	// Boarding: if standing in/at a boat and pressing use, mount it (and skip
+	// the place action this tick). input_pressed() is only sampled when a boat
+	// is actually in reach, so ordinary block placing is unaffected otherwise.
+	if(e->data.local_player.capture_input) {
+		uint32_t boat = boat_in_reach(
+			(vec3) {e->pos[0], e->pos[1] - EYE_HEIGHT, e->pos[2]});
+		if(boat && input_pressed(IB_ACTION2)) {
+			e->data.local_player.riding_boat_id = boat;
+			return false; // ride begins next tick
+		}
+	}
 
 	glm_vec3_copy(e->pos, e->pos_old);
 	glm_vec2_copy(e->orient, e->orient_old);

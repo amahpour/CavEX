@@ -42,6 +42,7 @@ enum client_rpc_type {
 	CRPC_OPEN_WINDOW,
 	CRPC_PARTICLE_BURST,
 	CRPC_GAMEMODE,
+	CRPC_SPAWN_BOAT,
 };
 
 struct client_rpc {
@@ -91,6 +92,11 @@ struct client_rpc {
 			struct item_data item;
 			vec3 pos;
 		} spawn_item;
+		struct {
+			uint32_t entity_id;
+			vec3 pos;
+			float yaw;
+		} spawn_boat;
 		struct {
 			uint32_t entity_id;
 			uint32_t collector_id;

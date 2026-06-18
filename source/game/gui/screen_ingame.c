@@ -155,7 +155,18 @@ void screen_ingame_render3D(struct screen* s, mat4 view) {
 }
 
 static void screen_ingame_update(struct screen* s, float dt) {
-	if(gstate.camera_hit.hit && input_pressed(IB_ACTION2)
+	// While riding a boat the player steers instead of interacting with the
+	// world (issue #34): suppress block place/dig so a board/steer tap never
+	// also places or mines a block. This is also what keeps the board tap from
+	// double-firing a place on the Wii (input_pressed there is not consumed
+	// between the player tick and this handler). Crosshair picking still runs.
+	bool riding = gstate.local_player
+		&& gstate.local_player->data.local_player.riding_boat_id;
+
+	if(riding)
+		gstate.digging.active = false;
+
+	if(!riding && gstate.camera_hit.hit && input_pressed(IB_ACTION2)
 	   && !gstate.digging.active) {
 		svin_rpc_send(&(struct server_rpc) {
 			.type = SRPC_BLOCK_PLACE,
@@ -252,7 +263,7 @@ static void screen_ingame_update(struct screen* s, float dt) {
 		if(input_released(IB_ACTION1))
 			gstate.digging.active = false;
 	} else {
-		if(gstate.camera_hit.hit && input_held(IB_ACTION1)
+		if(!riding && gstate.camera_hit.hit && input_held(IB_ACTION1)
 		   && time_diff_ms(gstate.digging.cooldown, time_get()) >= 250) {
 			gstate.digging.active = true;
 			gstate.digging.start = time_get();

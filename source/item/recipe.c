@@ -516,6 +516,11 @@ void recipe_init() {
 			   1, 2, (uint8_t[]) {1, 2},
 			   (struct item_data) {.id = ITEM_PAPER}, false,
 			   (struct item_data) {.id = ITEM_GUNPOWDER}, false);
+	// boat: five planks in a U shape (#34)
+	recipe_add(recipes_crafting,
+			   (struct item_data) {.id = ITEM_BOAT, .durability = 0, .count = 1},
+			   3, 2, (uint8_t[]) {1, 0, 1, 1, 1, 1},
+			   (struct item_data) {.id = BLOCK_PLANKS}, false);
 	recipe_add(
 		recipes_crafting,
 		(struct item_data) {.id = BLOCK_SLAB, .durability = 3, .count = 3}, 3,
