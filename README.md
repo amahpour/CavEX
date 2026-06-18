@@ -107,6 +107,8 @@ Kid-friendly, step-by-step guides for building things in-game:
 
 * [How to make a bubble elevator](docs/tutorials/bubble-elevator.md) — stack
   bubble blocks and ride them straight up.
+* [How to make fireworks](docs/tutorials/fireworks.md) — craft a firework rocket
+  and set off a burst of sparks.
 
 ## Tests
 
