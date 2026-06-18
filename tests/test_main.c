@@ -67,6 +67,9 @@ extern const size_t g_tests_level_count;
 extern const test_entry_t g_tests_region[];
 extern const size_t g_tests_region_count;
 
+extern const test_entry_t g_tests_region_migrate[];
+extern const size_t g_tests_region_migrate_count;
+
 extern const test_entry_t g_tests_demo[];
 extern const size_t g_tests_demo_count;
 
@@ -86,8 +89,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[25];
-static const size_t group_count = 25;
+static test_group_t groups[26];
+static const size_t group_count = 26;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -116,7 +119,9 @@ static void init_groups(void) {
 		= (test_group_t){g_tests_state_export, g_tests_state_export_count};
 	groups[22] = (test_group_t){g_tests_firework, g_tests_firework_count};
 	groups[23] = (test_group_t){g_tests_map, g_tests_map_count};
-	groups[24] = (test_group_t){g_tests_creative_inventory,
+	groups[24] = (test_group_t){g_tests_region_migrate,
+								g_tests_region_migrate_count};
+	groups[25] = (test_group_t){g_tests_creative_inventory,
 								g_tests_creative_inventory_count};
 }
 

@@ -90,6 +90,7 @@ add_executable(cavex_tests
 	test_window.c
 	test_level_archive.c
 	test_region.c
+	test_region_migrate.c
 	test_firework.c
 )
 
