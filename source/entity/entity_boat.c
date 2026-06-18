@@ -27,11 +27,14 @@
 #include <math.h>
 
 #include "../block/blocks_data.h"
-#include "../graphics/render_item.h"
 #include "../network/client_interface.h"
 #include "../network/server_local.h"
-#include "../platform/gfx.h"
 #include "entity.h"
+// NB: do NOT include platform/gfx.h here. It pulls <GL/glew.h> (PC) which is
+// absent in the headless CI test image, and this entity is compiled into the
+// unit-test library. The render below only calls item->renderItem (a function
+// pointer) and entity_shadow (declared in entity.h) -- no direct gfx_* calls --
+// so no graphics header is needed.
 
 // Pure steering math — see declaration in entity.h. Keeps no engine state so it
 // can be unit-tested in isolation.
