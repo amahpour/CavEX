@@ -33,6 +33,7 @@ TEST(state_export_full) {
 	st.on_ground = true;
 	st.flying = false;
 	st.creative = false;
+	st.riding = true;
 	st.hotbar_slot = 3;
 	st.hotbar_item = 17;
 	st.hotbar_count = 2;
@@ -62,6 +63,7 @@ TEST(state_export_full) {
 	ASSERT(contains(buf, "\"on_ground\":true"));
 	ASSERT(contains(buf, "\"flying\":false"));
 	ASSERT(contains(buf, "\"creative\":false"));
+	ASSERT(contains(buf, "\"riding\":true"));
 	ASSERT(contains(buf, "\"hotbar\":{\"slot\":3,\"item\":17,\"count\":2}"));
 	ASSERT(contains(buf, "\"aim\":{\"x\":10,\"y\":64,\"z\":-3,\"block\":1}"));
 	// first heightmap cell = 60, last = 60 + (25-1) = 84
@@ -100,6 +102,7 @@ TEST(state_export_no_player_and_defaults) {
 	n = state_export_write(buf, sizeof(buf), &st);
 	ASSERT(n > 0);
 	ASSERT(contains(buf, "\"aim\":null"));
+	ASSERT(contains(buf, "\"riding\":false"));
 	ASSERT(!contains(buf, "\"heightmap\""));
 	ASSERT(contains(buf, "\"hotbar\":{\"slot\":-1,\"item\":-1,\"count\":0}"));
 }

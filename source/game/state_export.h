@@ -54,6 +54,7 @@ struct game_export_state {
 	bool on_ground;
 	bool flying;
 	bool creative;
+	bool riding; // true while the player is aboard a boat (#82)
 
 	const char* screen; // current screen name, e.g. "ingame" / "select_world"
 
