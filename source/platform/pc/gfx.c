@@ -90,6 +90,15 @@ static void framebuffer_size_callback(GLFWwindow* window, int width,
 	window_width = width;
 	window_height = height;
 	glViewport(0, 0, gfx_width(), gfx_height());
+	// A resize/maximize drops the X11/XWayland pointer grab; re-establish the
+	// gameplay cursor lock so the cursor can't escape the window mid-play.
+	input_pointer_reassert();
+}
+
+static void window_focus_callback(GLFWwindow* window, int focused) {
+	// Re-grab the cursor on focus-gain (e.g. after alt-tabbing back in).
+	if(focused)
+		input_pointer_reassert();
 }
 
 static void scroll_callback(GLFWwindow* window, double xoffset,
@@ -113,11 +122,21 @@ void gfx_setup() {
 
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+	// Launch maximized (fills the screen) instead of a small 854x480 window. The
+	// window stays a normal resizable window; framebuffer_size_callback adapts
+	// the viewport + gfx_width/height, so the headless autoshot path (no
+	// compositor → no maximize) still gets the default 854x480 framebuffer.
+	glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
 	window
 		= glfwCreateWindow(window_width, window_height, GAME_NAME, NULL, NULL);
 	glfwMakeContextCurrent(window);
 
+	// Sync cached size to the real framebuffer in case the window opened
+	// maximized before framebuffer_size_callback is registered.
+	glfwGetFramebufferSize(window, &window_width, &window_height);
+
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+	glfwSetWindowFocusCallback(window, window_focus_callback);
 	glfwSetScrollCallback(window, scroll_callback);
 
 	if(glfwRawMouseMotionSupported())

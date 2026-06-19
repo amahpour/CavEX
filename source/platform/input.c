@@ -118,6 +118,18 @@ void input_pointer_enable(bool enable) {
 	input_pointer_enabled = enable;
 }
 
+void input_pointer_reassert(void) {
+	// Only re-grab during gameplay (cursor disabled); leave the menu cursor
+	// visible. On X11/XWayland a window resize/maximize/focus-change drops the
+	// pointer grab and the cursor escapes. A plain re-set to GLFW_CURSOR_DISABLED
+	// is a no-op when GLFW still thinks the cursor is disabled, so toggle through
+	// GLFW_CURSOR_NORMAL to force the underlying grab back.
+	if(!input_pointer_enabled) {
+		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	}
+}
+
 bool input_pointer(float* x, float* y, float* angle) {
 	double x2, y2;
 	glfwGetCursorPos(window, &x2, &y2);
@@ -401,6 +413,8 @@ void input_debug_wpad(char* dst, size_t len) {
 }
 
 void input_pointer_enable(bool enable) { }
+
+void input_pointer_reassert(void) { }
 
 bool input_pointer(float* x, float* y, float* angle) {
 	struct ir_t ir;

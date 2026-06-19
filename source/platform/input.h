@@ -68,6 +68,9 @@ bool input_released(enum input_button b);
 bool input_held(enum input_button b);
 bool input_joystick(float dt, float* x, float* y);
 void input_pointer_enable(bool enable);
+// Re-establish the gameplay cursor lock after a window event (resize/maximize/
+// focus-gain) drops the pointer grab. No-op on Wii and while in menus.
+void input_pointer_reassert(void);
 bool input_pointer(float* x, float* y, float* angle);
 
 #ifdef PLATFORM_PC
