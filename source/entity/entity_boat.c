@@ -83,6 +83,13 @@ static bool entity_boat_server_tick(struct entity* e, struct server_local* s) {
 	e->data.boat.control_forward = 0;
 	e->data.boat.control_turn = 0;
 
+	// Unmanned boats damp harder so a riderless hull settles in place instead of
+	// drifting/wandering off, and stays easy to find and re-board (#93).
+	if(e->data.boat.passenger_id == 0) {
+		e->vel[0] *= 0.6F;
+		e->vel[2] *= 0.6F;
+	}
+
 	for(int k = 0; k < 3; k++)
 		if(fabsf(e->vel[k]) < 0.005F)
 			e->vel[k] = 0.0F;
