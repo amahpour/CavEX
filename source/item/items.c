@@ -117,7 +117,7 @@ void items_init() {
 	items[330] = &item_door_iron;
 	items[331] = &item_redstone;
 	items[332] = &item_snow_ball;
-	// boat
+	items[333] = &item_boat;
 	items[334] = &item_leather;
 	// milk bucket
 	items[336] = &item_brick;

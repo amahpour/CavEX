@@ -99,6 +99,7 @@ add_executable(cavex
 				source/entity/entity_id.c
 				source/entity/entity_local_player.c
 				source/entity/entity_item.c
+				source/entity/entity_boat.c
 
 				source/cNBT/buffer.c
 				source/cNBT/nbt_loading.c
@@ -129,6 +130,7 @@ add_executable(cavex
 				source/item/items/item_sugarcane.c
 				source/item/items/item_door.c
 				source/item/items/item_firework.c
+				source/item/items/item_boat.c
 
 				source/network/client_interface.c
 				source/network/level_archive.c

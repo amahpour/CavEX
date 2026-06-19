@@ -68,6 +68,26 @@ struct entity* server_local_spawn_item(vec3 pos, struct item_data* it,
 	return e;
 }
 
+struct entity* server_local_spawn_boat(vec3 pos, float yaw,
+									   struct server_local* s) {
+	assert(s);
+
+	uint32_t entity_id = entity_gen_id(s->entities);
+	struct entity* e = dict_entity_safe_get(s->entities, entity_id);
+	entity_boat(entity_id, e, true, &s->world);
+	e->data.boat.yaw = yaw;
+	e->teleport(e, pos);
+
+	clin_rpc_send(&(struct client_rpc) {
+		.type = CRPC_SPAWN_BOAT,
+		.payload.spawn_boat.entity_id = e->id,
+		.payload.spawn_boat.pos = {e->pos[0], e->pos[1], e->pos[2]},
+		.payload.spawn_boat.yaw = yaw,
+	});
+
+	return e;
+}
+
 void server_local_spawn_block_drops(struct server_local* s,
 									struct block_info* blk_info) {
 	assert(s && blk_info);
@@ -366,6 +386,27 @@ static void server_local_process(struct server_rpc* call, void* user) {
 					.payload.inventory_slot.slot = slot,
 					.payload.inventory_slot.item = stack,
 				});
+			}
+			break;
+		}
+		case SRPC_BOAT_CONTROL: {
+			// Apply the rider's steer/throttle to the boat entity. The boat's
+			// own tick_server integrates it; here we just latch the inputs so the
+			// server stays authoritative over the motion.
+			struct entity* e = dict_entity_get(
+				s->entities, call->payload.boat_control.entity_id);
+			if(e && e->type == ENTITY_BOAT) {
+				if(call->payload.boat_control.dismount) {
+					e->data.boat.passenger_id = 0;
+					e->data.boat.control_forward = 0;
+					e->data.boat.control_turn = 0;
+				} else {
+					e->data.boat.passenger_id = 1; // marker: ridden
+					e->data.boat.control_forward
+						= call->payload.boat_control.forward;
+					e->data.boat.control_turn
+						= call->payload.boat_control.turn;
+				}
 			}
 			break;
 		}
