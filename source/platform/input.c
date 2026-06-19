@@ -477,10 +477,25 @@ static struct input_virtual_source* input_virtual_src = NULL;
 static bool input_virtual_cur[IB_COUNT];
 static bool input_virtual_prev[IB_COUNT];
 
+// The 20 Hz accumulator (main.c) can step the virtual source SEVERAL times per
+// rendered frame, but the consumers run once per frame: input_pressed() in the
+// screen update, input_joystick()/get_look() in the camera. Deriving the edge
+// live from cur/prev (rolled every tick) therefore loses any press whose tick is
+// not the last in its frame, and reading the source's per-tick look once per
+// frame loses every earlier tick's delta. So we LATCH edges and ACCUMULATE look
+// across all ticks stepped within a frame; the consumers drain the latch once.
+static bool input_virtual_pending_press[IB_COUNT];
+static bool input_virtual_pending_release[IB_COUNT];
+static float input_virtual_look_dx;
+static float input_virtual_look_dy;
+
 void input_set_virtual_source(struct input_virtual_source* src) {
 	input_virtual_src = src;
-	for(int b = 0; b < IB_COUNT; b++)
+	for(int b = 0; b < IB_COUNT; b++) {
 		input_virtual_cur[b] = input_virtual_prev[b] = false;
+		input_virtual_pending_press[b] = input_virtual_pending_release[b] = false;
+	}
+	input_virtual_look_dx = input_virtual_look_dy = 0.0F;
 }
 
 struct input_virtual_source* input_get_virtual_source(void) {
@@ -494,14 +509,29 @@ void input_virtual_step_tick(int tick) {
 	if(input_virtual_src->step_tick)
 		input_virtual_src->step_tick(input_virtual_src, tick);
 
-	// Snapshot the per-tick button levels and roll the previous set forward so
-	// edges (pressed/released) are derived from tick-to-tick transitions.
+	// Snapshot the per-tick button levels and roll the previous set forward, then
+	// LATCH any edge into a pending flag that survives until a consumer drains it
+	// -- so a press/release on a non-final tick of a multi-tick frame is not lost.
 	for(int b = 0; b < IB_COUNT; b++) {
 		input_virtual_prev[b] = input_virtual_cur[b];
 		input_virtual_cur[b] = input_virtual_src->get_button
 			? input_virtual_src->get_button(input_virtual_src,
 											(enum input_button)b)
 			: false;
+		if(input_virtual_cur[b] && !input_virtual_prev[b])
+			input_virtual_pending_press[b] = true;
+		if(!input_virtual_cur[b] && input_virtual_prev[b])
+			input_virtual_pending_release[b] = true;
+	}
+
+	// Drain this tick's look delta and ACCUMULATE it; input_joystick() applies
+	// (and clears) the sum once per frame. Summing means every stepped tick's
+	// rotation reaches the camera even when several ticks share one frame.
+	if(input_virtual_src->get_look) {
+		float dx = 0.0F, dy = 0.0F;
+		input_virtual_src->get_look(input_virtual_src, &dx, &dy);
+		input_virtual_look_dx += dx;
+		input_virtual_look_dy += dy;
 	}
 }
 
@@ -576,15 +606,12 @@ bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 bool input_pressed(enum input_button b) {
 #ifdef PLATFORM_PC
 	if(input_virtual_src) {
-		// The virtual source latches its button levels per 20 Hz tick, but
-		// input_pressed() consumers (e.g. the in-game screen update) run once
-		// per FRAME. Without consuming the edge, a single scripted press would
-		// read true on every frame of that tick and fire the action many times
-		// (e.g. toggling creative on/off repeatedly). Report the rising edge
-		// once, then clear it (re-armed by the next input_virtual_step_tick).
-		bool edge = input_virtual_cur[b] && !input_virtual_prev[b];
-		if(edge)
-			input_virtual_prev[b] = input_virtual_cur[b];
+		// Drain the latched rising edge (set by input_virtual_step_tick for any
+		// tick in this frame). Returning it once and clearing keeps a per-frame
+		// consumer from firing the action repeatedly within the tick, and the
+		// latch keeps an edge from a non-final tick of the frame alive until read.
+		bool edge = input_virtual_pending_press[b];
+		input_virtual_pending_press[b] = false;
 		return edge;
 	}
 #endif
@@ -622,12 +649,9 @@ bool input_pressed(enum input_button b) {
 bool input_released(enum input_button b) {
 #ifdef PLATFORM_PC
 	if(input_virtual_src) {
-		// Same per-frame edge-consumption as input_pressed(): report the
-		// falling edge once per tick, then clear it so a frame-rate consumer
-		// does not see the release repeatedly within the same tick.
-		bool edge = !input_virtual_cur[b] && input_virtual_prev[b];
-		if(edge)
-			input_virtual_prev[b] = input_virtual_cur[b];
+		// Drain the latched falling edge (see input_pressed()).
+		bool edge = input_virtual_pending_release[b];
+		input_virtual_pending_release[b] = false;
 		return edge;
 	}
 #endif
@@ -698,9 +722,11 @@ bool input_held(enum input_button b) {
 bool input_joystick(float dt, float* x, float* y) {
 #ifdef PLATFORM_PC
 	if(input_virtual_src) {
-		*x = *y = 0.0F;
-		if(input_virtual_src->get_look)
-			input_virtual_src->get_look(input_virtual_src, x, y);
+		// Apply the look delta accumulated across every tick stepped since the
+		// last camera poll, then clear it (drained once per frame).
+		*x = input_virtual_look_dx;
+		*y = input_virtual_look_dy;
+		input_virtual_look_dx = input_virtual_look_dy = 0.0F;
 		return true;
 	}
 #endif
