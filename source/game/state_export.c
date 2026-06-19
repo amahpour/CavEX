@@ -74,6 +74,7 @@ int state_export_write(char* buf, size_t bufsz,
 		put(buf, bufsz, &off, ",\"flying\":%s", st->flying ? "true" : "false");
 		put(buf, bufsz, &off, ",\"creative\":%s",
 			st->creative ? "true" : "false");
+		put(buf, bufsz, &off, ",\"riding\":%s", st->riding ? "true" : "false");
 
 		put(buf, bufsz, &off, ",\"hotbar\":{\"slot\":%d,\"item\":%d,\"count\":%d}",
 			st->hotbar_slot, st->hotbar_item, st->hotbar_count);
@@ -158,6 +159,7 @@ void state_export_emit(int tick) {
 		// Creative mode is a separate (later) feature; until it lands flight is
 		// the only "creative-ish" state, so report it conservatively as off.
 		st.creative = false;
+		st.riding = p->data.local_player.riding_boat_id != 0;
 
 		struct inventory* inv
 			= windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]);
