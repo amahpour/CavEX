@@ -34,8 +34,17 @@ static bool boat_place(struct server_local* s, struct item_data* it,
 	// matching the sin(yaw)/cos(yaw) convention the entity uses.
 	float yaw = glm_rad(-(float)s->player.rx);
 
-	server_local_spawn_boat(
-		(vec3) {where->x + 0.5F, where->y + 0.1F, where->z + 0.5F}, yaw, s);
+	// Spawn the hull resting ON the cell floor, not embedded in it. The boat's
+	// AABB is BOAT_HEIGHT tall and centred on the entity origin, so the origin
+	// must sit at least BOAT_HEIGHT/2 above the cell floor; otherwise the hull's
+	// bottom clips into the block below and every steering impulse is cancelled
+	// by the resulting horizontal collision -- the boat looks placed but never
+	// moves. A small extra epsilon lets gravity settle it cleanly onto uneven
+	// ground. (Fixes "boat doesn't move on land".)
+	server_local_spawn_boat((vec3) {where->x + 0.5F,
+									where->y + BOAT_HEIGHT / 2.0F + 0.05F,
+									where->z + 0.5F},
+							yaw, s);
 
 	return true;
 }
