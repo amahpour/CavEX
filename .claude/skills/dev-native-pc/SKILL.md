@@ -49,7 +49,30 @@ carry back to the `.dol`.
    # exit 124 = survived; Read the autoshot PNGs to see what rendered
    ```
 
-4. **Crash? gdb one-liner** (binary has symbols; run under gdb since yama
+4. **Autonomous playtest + gameplay assessment** (issue #83) — plays through the
+   live input path and scores a gameplay-quality verdict, no human/keys:
+
+   ```bash
+   # pure scorer's deterministic proof (synthetic logs; no game needed)
+   python3 scripts/gameplay_assess.py --selftest
+   # one headless heuristic episode (vblank_mode=0 is set for you by the script)
+   # -> run.jsonl + assessment.json + assessment.md in the run dir
+   python3 scripts/ai_playtest.py --policy heuristic --max-ticks 200 \
+       --run-dir /tmp/pt --autoshot 4        # --autoshot also stitches a GIF
+   ```
+
+   - GATED run (`CAVEX_AGENT=1` + `CAVEX_AGENT_GATED=1`): the game pauses each
+     tick until the driver's action arrives, so latency can't drop/mistime input.
+   - `gameplay_assess.py` is a PURE scorer (run log → responsiveness/locomotion/
+     stability/friction + `solid`/`rough`/`broken`); `mechanic_completion`,
+     `feedback_legibility`, `feel` are reported DEFERRED (need an LLM/state-export
+     additions). `ai_playtest.py` is the orchestrator with a pluggable **Policy**
+     seam: `heuristic` (the deterministic walker) and a `claude-bridge` stub — the
+     hook for an LLM to drive richer goals and judge feel (wired, not gating).
+   - Reproducible: `--seed` (default 42) → identical `assessment.json` across runs.
+     Always an isolated scratch world; the real Claude World save is never touched.
+
+5. **Crash? gdb one-liner** (binary has symbols; run under gdb since yama
    blocks attach):
 
    ```bash
@@ -59,7 +82,7 @@ carry back to the `.dol`.
    # gdb stops and runs the bt; use `thread apply all bt` for deadlocks.
    ```
 
-5. **Memory bugs / second opinion — ASan build** (`build_asan/`, same run dir):
+6. **Memory bugs / second opinion — ASan build** (`build_asan/`, same run dir):
 
    ```bash
    cd ~/code/CavEX/build_asan && make -j"$(nproc)"

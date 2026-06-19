@@ -83,6 +83,38 @@ Coverage policy: `scripts/check_test_coverage.sh` runs every registered test in
 isolation; tests that add zero unique covered lines fail the gate and must be
 removed or rewritten. See GitHub issue #40 for tier 2+ expansion plans.
 
+## Autonomous playtest / gameplay assessment (native PC)
+
+Plays CavEX through the **live** input path (#67) on an isolated scratch world,
+logs every perceive→act tick, and scores a gameplay-quality verdict — no human,
+no API keys, deterministic (issue #83). Python + docs only; not in `make test`
+(it needs the headless PC binary, like the capture rig).
+
+```bash
+# end-to-end heuristic episode -> run.jsonl + assessment.json + assessment.md
+python3 scripts/ai_playtest.py --policy heuristic --max-ticks 200 --run-dir /tmp/pt --autoshot 4
+# the pure scorer's deterministic proof (synthetic logs -> asserted scores; no game)
+python3 scripts/gameplay_assess.py --selftest
+```
+
+- `scripts/gameplay_assess.py` — **pure** scorer (no I/O/game): a run log →
+  objective rubric (control responsiveness, locomotion, stability, friction) +
+  evidence refs + a `solid`/`rough`/`broken` verdict; `mechanic_completion` /
+  `feedback_legibility` / `feel` are reported **DEFERRED** (need an LLM and/or
+  state-export additions), never silently omitted. `--selftest` is the gate.
+- `scripts/ai_playtest.py` — orchestrator: gated run (`CAVEX_AGENT=1` +
+  `CAVEX_AGENT_GATED=1`, so driver latency never drops/mistimes input), pluggable
+  **Policy** seam, writes the log + both report forms, optional `--autoshot`→GIF
+  and `--upload`. Reuses `agent_play_demo.make_run_dir` for isolation; `--seed`
+  (default 42 → `CAVEX_SEED`) makes the scratch world reproducible.
+- Policies: `heuristic` (the `agent_play_demo.py` walker, moved behind
+  `HeuristicPolicy`; deterministic regression driver, behaviour unchanged) and a
+  `claude-bridge` **stub** — the seam where an LLM reads state (+ optionally the
+  latest frame) and returns an action **and** a per-decision feel note. Wired,
+  not gating; defers to the heuristic so it runs offline with no key.
+- Determinism: fixed `--seed` + heuristic ⇒ identical `assessment.json` across
+  runs (every emitted state line is an in-world tick from 0; no menu ticks leak).
+
 Dev rig (TEMPORARY — REMOVE before any "release"/clean commit; HANDOFF item #3):
 - Debug overlay lines in `screen_ingame.c` (+ helpers in `input.c`, counters
   in `chunk_mesher.c`/`world.c`/`chunk.c`): WPAD state, mesh sent/recv,

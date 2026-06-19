@@ -57,11 +57,16 @@ def log(msg, quiet=False):
         print(msg, file=sys.stderr, flush=True)
 
 
-def make_run_dir(world_src, run_dir=None):
+def make_run_dir(world_src, run_dir=None, seed=None):
     """Build an isolated run dir (own config + a scratch world) like the rig.
 
     Everything (config paths, assets symlink, world) is created directly in the
     final dir so the absolute paths baked into config.json stay valid.
+
+    `seed`, when set, is exported as CAVEX_SEED to the gen_world.py subprocess so
+    a generated scratch world is reproducible (gen_world derives all terrain from
+    CAVEX_SEED, default 42). Passing an explicit `world_src` ignores `seed`. This
+    keeps the default behaviour (seed=None) byte-for-byte unchanged.
     """
     if run_dir is None:
         run_dir = tempfile.mkdtemp(prefix="cavex_agent_")
@@ -96,9 +101,12 @@ def make_run_dir(world_src, run_dir=None):
         shutil.copytree(world_src, world_dst)
     else:
         tmp = tempfile.mkdtemp(prefix="cavex_world_")
+        gen_env = dict(os.environ)
+        if seed is not None:
+            gen_env["CAVEX_SEED"] = str(seed)
         subprocess.run(
             [sys.executable, os.path.join(ROOT, "gen_world.py"), tmp],
-            check=True, stdout=subprocess.DEVNULL,
+            check=True, stdout=subprocess.DEVNULL, env=gen_env,
         )
         shutil.copytree(os.path.join(tmp, "world"), world_dst)
         shutil.rmtree(tmp, ignore_errors=True)
@@ -168,6 +176,40 @@ def decide(state, jump_cooldown=0):
     if best_h > centre and jump_cooldown <= 0:
         tokens.append("JUMP=1")
     return " ".join(tokens)
+
+
+class HeuristicPolicy:
+    """The reference 'walk toward higher ground' policy as a reusable object.
+
+    This is `decide()` plus the jump-cooldown bookkeeping that the reference
+    driver's main() loop keeps, packaged behind the pluggable Policy seam used by
+    scripts/ai_playtest.py: `decide(state, frame_path=None) -> action line`. The
+    behaviour is IDENTICAL to running this module standalone -- the cooldown is
+    decremented once per consulted tick, the same action string is produced, and
+    a hop re-arms the cooldown -- so it stays the deterministic regression driver
+    while also being importable by the assessment harness.
+
+    `frame_path` (the latest captured frame) is accepted for seam compatibility
+    with richer policies but ignored: the heuristic decides on the state alone.
+    """
+
+    name = "heuristic"
+    wants_frame = False  # decides on state only; never reads a frame
+
+    def __init__(self):
+        self.jump_cooldown = 0
+        self.last_note = None  # heuristic emits no per-decision judgment
+
+    def decide(self, state, frame_path=None):
+        # Mirror main()'s order exactly: age the cooldown, decide, then re-arm on
+        # a hop. Identical sequencing keeps the walker's output bit-for-bit equal
+        # to the standalone driver.
+        if self.jump_cooldown > 0:
+            self.jump_cooldown -= 1
+        action = decide(state, self.jump_cooldown)
+        if "JUMP=1" in action.split():
+            self.jump_cooldown = JUMP_COOLDOWN_TICKS
+        return action
 
 
 def main():
