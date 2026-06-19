@@ -28,7 +28,7 @@
 // Boat riding (issue #34): how far above the hull centre the rider's eyes sit,
 // and how close the player's feet must be to a boat centre to board it.
 #define BOAT_RIDE_HEIGHT 1.0F
-#define BOAT_MOUNT_REACH 1.75F
+#define BOAT_MOUNT_REACH 2.5F
 
 // Upward velocity imparted by a bubble column each tick. Small and clamped so
 // the player rises steadily without being launched through the ceiling.
