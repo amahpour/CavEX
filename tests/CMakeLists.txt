@@ -80,6 +80,7 @@ add_executable(cavex_tests
 	test_recipe.c
 	test_tool.c
 	test_entity.c
+	test_entity_tick.c
 	test_double_tap.c
 	test_demo.c
 	test_state_export.c
