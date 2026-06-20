@@ -123,7 +123,38 @@ building fixed. Also confirmed the world-reuse speedup: the task ran in **4.7s**
 vs **67s** before (terrain is generated once per seed and copied in). Full-battery
 re-confirm follows once the in-flight planner run frees the game.
 
-**Follow-up (next round):** export `aim.side` (the engine already has
-`camera_hit.side`) and gate placement on a confirmed TOP-face hit — retro-hardens
-horizontal builds too.
+**Full-battery re-confirm:** `stack_3` **3/3** in the battery; battery **8/9**,
+mean **0.926 → 0.944**. World-reuse cut battery wall time from ~11 min to ~80 s
+(per-task 64–67 s → 2–14 s).
+
+**New weakness surfaced (the loop working):** `dig_down_2` went 2/2 → **1/2**, and
+the dig code was untouched — so it's **flaky**, not a regression. Confirmed over 3
+repeats: **PASS / FAIL / PASS** (2/3). Round 2 targets it.
+
+### Round 2 — `dig_down` reliability (flaky 2/3)
+
+Hypothesis: digging straight down, the player breaks the block, **falls**, and the
+next `mine_block` starts before the player has settled — while falling, the aimed
+cell below keeps changing, which **resets dig progress** (CavEX resets the dig
+whenever `camera_hit` moves), so the second dig intermittently times out. Fix
+direction: after each break, wait for `on_ground` + a stable aim before the next
+dig, and retry once. (Other backlog: export `aim.side` to gate top-face placement;
+build-efficiency for multi-block houses; boats.)
+
+**Result:** `dig_down` hardened — wait for `on_ground` before each dig + retry
+once. **6/6** over repeats (was 2/3). Verified adversarially by repetition rather
+than a single run, since the bug was intermittent.
+
+### Backlog (future rounds)
+
+- **Build efficiency** — multi-block builds (a real house) are slow: `goto`/aim
+  spin when navigating among already-placed blocks. Cap the `aim_at` refine search
+  and pick stances that don't require walking through the build.
+- **Export `aim.side`** (engine has `camera_hit.side`) → gate placement on a
+  confirmed TOP-face hit; retro-hardens horizontal builds.
+- **Boats** — add `ITEM_BOAT` to the world inventory + `place_boat`/`board`
+  (confirm via the `riding` flag); the agent boards a boat it placed without any
+  engine change.
+- **Wire `llm_complete`** to the Anthropic API so fully open-ended goals plan
+  themselves (the seam exists; falls back to the template planner offline).
 

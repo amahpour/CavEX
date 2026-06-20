@@ -463,17 +463,27 @@ class GameSession:
         return placed, total
 
     def dig_down(self, n=1, timeout_s=8.0):
-        """Mine straight down ``n`` blocks (the block under the player's feet)."""
+        """Mine straight down ``n`` blocks (the block under the player's feet).
+
+        After each break the player FALLS one block; the next dig must not start
+        mid-fall, or the aimed cell keeps changing and CavEX resets dig progress
+        (the flaky 2/3 failure mode). So we wait to land fully before each dig and
+        retry a dig once."""
         broke = 0
         for _ in range(n):
+            self._await_ground()              # fully landed before the next dig
             cx, cz = self.feet_column()
             sy = self.top_solid_y(0, 0)
             if sy is None:
                 break
-            if not self.mine_block(cx, sy, cz, timeout_s=timeout_s):
+            ok = self.mine_block(cx, sy, cz, timeout_s=timeout_s)
+            if not ok:
+                self._await_ground()          # settle and retry once
+                ok = self.mine_block(cx, sy, cz, timeout_s=timeout_s)
+            if not ok:
                 break
             broke += 1
-            self.step("", settle=3)          # fall into the new hole, settle
+            self.step("", settle=2)
         return broke
 
     def build_floor(self, x0, z0, w, l, y, item=3):
