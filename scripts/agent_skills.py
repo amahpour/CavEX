@@ -372,6 +372,100 @@ class GameSession:
         # Fallback confirm: we now aim at a solid block where the target is.
         return self._aim_is(bx, by, bz)
 
+    # -- navigation --------------------------------------------------------
+    def goto(self, tx, tz, tol=0.7, max_ticks=300, level=True):
+        """Walk to the centre of world column (tx,tz). Closed-loop steer toward
+        the heading with FORWARD held; auto-jumps when a step blocks progress.
+
+        Keeps the view near the horizon (``level``) for a natural human gait."""
+        last = None
+        stuck = 0
+        for _ in range(max_ticks):
+            px, _, pz = self.pos()
+            dx, dz = (tx + 0.5) - px, (tz + 0.5) - pz
+            if math.hypot(dx, dz) <= tol:
+                self.step("")             # arrive: stop walking
+                return True
+            ey = _wrap(math.atan2(dx, dz) - self.yaw())
+            ldx = _clamp(ey / self.gain_yaw, -0.20, 0.20)
+            ldy = 0.0
+            if level:
+                ldy = _clamp((math.pi / 2 - self.pitch()) / self.gain_pitch,
+                             -0.10, 0.10)
+            act = "FORWARD=1 LOOK=%.4f,%.4f" % (ldx, ldy)
+            if last is not None and math.dist((px, pz), last) < 0.03:
+                stuck += 1
+            else:
+                stuck = 0
+            last = (px, pz)
+            if stuck >= 2:                 # not moving -> hop the obstacle/step
+                act += " JUMP=1"
+                stuck = 0
+            self.step(act)
+        px, _, pz = self.pos()
+        return math.hypot((tx + 0.5) - px, (tz + 0.5) - pz) <= tol
+
+    def reachable(self, bx, by, bz, maxd=4.0):
+        px, py, pz = self.pos()
+        return math.dist((px, py, pz), (bx + 0.5, by + 0.5, bz + 0.5)) <= maxd
+
+    def place_world(self, bx, by, bz, item=None):
+        """Place a block anywhere by first walking to a clear stance just SOUTH of
+        it and looking DOWN at the support's top face.
+
+        This is the human-like, reliable placement path: standing adjacent forces
+        a steep approach (camera_hit.side == UP -> block lands on top, not the
+        side) and removes the occlusion that breaks same-spot multi-block builds.
+        """
+        sx, sz = bx, bz - 1
+        px, _, pz = self.pos()
+        if math.hypot((sx + 0.5) - px, (sz + 0.5) - pz) > 0.7:
+            self.goto(sx, sz, tol=0.6)
+        # A floor block sits at the player's own feet level; if the body (0.6 wide)
+        # overlaps the target column the engine refuses the place ("can't place
+        # inside yourself"). Back off north until the south edge clears.
+        for _ in range(6):
+            px, py, pz = self.pos()
+            feet_y = round(py - EYE_HEIGHT)
+            if by != feet_y or (bz - pz) >= 1.05:
+                break
+            self.turn_to(yaw_des=0.0, pitch_des=self.pitch(), tol=0.12,
+                         max_ticks=8)        # face +z (toward target)
+            self.step("BACKWARD=1")          # ... so BACKWARD steps away (north)
+        return self.place_block(bx, by, bz, item=item)
+
+    # -- composite builds --------------------------------------------------
+    def build_blocks(self, targets, item=3):
+        """Place a list of world blocks (ordered bottom-up by the caller).
+
+        Repositions (goto) when a target is out of arm's reach, re-selects the
+        item after moving, and confirms each placement. Returns (placed, total)."""
+        total = len(targets)
+        placed = 0
+        if not self.select(item):
+            return placed, total
+        # Build bottom-up (y), and far-to-near in z so the south stance cell
+        # (bz-1) is always clear ground, never a block we just placed.
+        order = sorted(targets, key=lambda b: (b[1], -b[2], b[0]))
+        for (bx, by, bz) in order:
+            if self.place_world(bx, by, bz, item=item):
+                placed += 1
+        return placed, total
+
+    def dig_down(self, n=1, timeout_s=8.0):
+        """Mine straight down ``n`` blocks (the block under the player's feet)."""
+        broke = 0
+        for _ in range(n):
+            cx, cz = self.feet_column()
+            sy = self.top_solid_y(0, 0)
+            if sy is None:
+                break
+            if not self.mine_block(cx, sy, cz, timeout_s=timeout_s):
+                break
+            broke += 1
+            self.step("", settle=3)          # fall into the new hole, settle
+        return broke
+
 
 # ---------------------------------------------------------------------------
 # Self-test: prove mine + place mutate the world, end-to-end, headless.
@@ -396,9 +490,51 @@ def selftest(run_dir, seed=42, quiet=False):
     return result
 
 
+def composite_selftest(run_dir, seed=42, quiet=False):
+    """Prove the composite skills. Each check runs in its OWN isolated session so
+    results are independent and deterministic (no cross-task world coupling)."""
+    r = {}
+
+    # Navigate: walk 5 blocks south and confirm arrival.
+    s = GameSession(run_dir + "_goto", seed=seed, quiet=quiet).start()
+    cx, cz = s.feet_column()
+    arrived = s.goto(cx, cz + 5, tol=0.9)
+    px, _, pz = s.pos()
+    r["goto"] = "arrived" if arrived else ("dist=%.1f" % math.hypot(
+        cx + 0.5 - px, cz + 5.5 - pz))
+    s.close()
+
+    # Build a 2x2 floor north-east of the player.
+    s = GameSession(run_dir + "_floor", seed=seed, quiet=quiet).start()
+    cx, cz = s.feet_column()
+    base = s.top_solid_y(0, 0) + 1
+    floor = [(cx + 1, base, cz + 1), (cx + 2, base, cz + 1),
+             (cx + 1, base, cz + 2), (cx + 2, base, cz + 2)]
+    placed, total = s.build_blocks(floor, item=3)
+    r["floor"] = "%d/%d" % (placed, total)
+    s.close()
+
+    # Build a 3-high pillar (vertical stacking).
+    s = GameSession(run_dir + "_pillar", seed=seed, quiet=quiet).start()
+    cx, cz = s.feet_column()
+    base = s.top_solid_y(0, 0) + 1
+    p = 0
+    for h in range(3):
+        if s.place_world(cx + 2, base + h, cz, item=3):
+            p += 1
+        else:
+            break
+    r["pillar"] = "%d/3" % p
+    s.close()
+    return r
+
+
 def main():
     ap = argparse.ArgumentParser(description="CavEX closed-loop skills")
-    ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--selftest", action="store_true",
+                    help="prove mine + place one block")
+    ap.add_argument("--composite", action="store_true",
+                    help="prove navigate + build a floor + stack")
     ap.add_argument("--run-dir", default="/tmp/cavex_skills_selftest")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--quiet", action="store_true")
@@ -407,6 +543,14 @@ def main():
         r = selftest(args.run_dir, seed=args.seed, quiet=args.quiet)
         print("SELFTEST:", json.dumps(r, indent=2))
         return 0 if (r["mine"].startswith("YES") and r["place"].startswith("YES")) else 1
+    if args.composite:
+        r = composite_selftest(args.run_dir, seed=args.seed, quiet=args.quiet)
+        print("COMPOSITE:", json.dumps(r, indent=2))
+        # Gate on the SOLID skills (navigate + horizontal build). Vertical
+        # stacking (pillar) is a known-hard skill reported for information -- it
+        # needs pillar-jumping and is a target for the improvement loop.
+        ok = r["floor"] == "4/4" and r["goto"] == "arrived"
+        return 0 if ok else 1
     ap.print_help()
     return 2
 
