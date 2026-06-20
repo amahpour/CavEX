@@ -183,10 +183,17 @@ missing nearby-entity export is irrelevant. `make_boat()`: select boat → aim a
 the ground → PLACE (confirmed by the item being **consumed** → the entity spawned)
 → walk to the cell → use (confirmed by `riding`).
 
-**Result:** works end-to-end headless — boards on the first use (`riding: True`).
-Battery now **10/10, mean 1.000** (the boat-item addition didn't regress the other
-9). Wired as the `make_boat` eval task + a planner template, so
-`agent_planner.py --goal "create a boat"` does it.
+**Result:** works end-to-end headless — boards on the first use (`riding: True`),
+reliable across repeats (**6/6** without frame capture). Battery now **10/10, mean
+1.000** (the boat-item addition didn't regress the other 9). Wired as the
+`make_boat` eval task + a planner template, so `agent_planner.py --goal "create a
+boat"` does it.
+
+> Caveat worth remembering: heavy `--autoshot` PNG dumps perturb the *render-time*
+> aim raycast and can fail an otherwise-passing captured run — so the headless
+> battery (no autoshot) is the verification, not a screenshot/GIF. This is the
+> same hazard as [[overnight-pr-proof-of-play-images]] (proof tooling must not
+> change the path it's proving).
 
 ### Backlog (future rounds)
 
