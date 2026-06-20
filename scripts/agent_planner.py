@@ -65,8 +65,8 @@ SKILLS = {
     "build_walls": (
         lambda s, a: _build_result(s.build_walls(
             a["x0"], a["z0"], a["w"], a["l"], a["height"],
-            item=a.get("item", 3), door=a.get("door", True))),
-        "build_walls {x0,z0,w,l,height,item?,door?}: perimeter walls, opt doorway"),
+            item=a.get("item", 3), door=a.get("door", True), y0=a.get("y0"))),
+        "build_walls {x0,z0,w,l,height,y0?,item?,door?}: perimeter walls, opt doorway"),
     "dig_down": (
         lambda s, a: {"ok": s.dig_down(a["n"]) == a["n"],
                       "detail": "%s deep" % a["n"]},
@@ -128,8 +128,10 @@ class TemplatePlanner:
                           "args": {"x0": x0, "z0": z0, "w": w, "l": l, "y": base},
                           "note": "lay the %dx%d floor" % (w, l)})
             steps.append({"skill": "build_walls",
+                          # walls sit ON the floor -> explicit y0=base+1 (don't let
+                          # build_walls recompute it from the post-floor position)
                           "args": {"x0": x0, "z0": z0, "w": w, "l": l,
-                                   "height": 1, "door": True},
+                                   "height": 1, "door": True, "y0": base + 1},
                           "note": "raise the perimeter walls with a doorway"})
             return steps
 
@@ -146,7 +148,7 @@ class TemplatePlanner:
                  "note": "fallback: a 3x3 floor"},
                 {"skill": "build_walls",
                  "args": {"x0": cx + 1, "z0": cz + 1, "w": 3, "l": 3,
-                          "height": 1, "door": True},
+                          "height": 1, "door": True, "y0": base + 1},
                  "note": "fallback: 3x3 walls"}]
 
 
