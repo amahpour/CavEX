@@ -86,3 +86,44 @@ Key reads: structures (wall ring) build reliably; straight-down aiming works
 (dig_down passes), so **pillar-jump is feasible**. The lone gap is building
 *upward*. Round 1 targets `stack_3`.
 
+### Round 1 — vertical stacking (`stack_3`) + a calibration-robustness bug
+
+**Adversarial subagent review.** A subagent was given the live-interface facts,
+the symptom (`stack_3` 1/3), and the code, and told to independently diagnose +
+propose a fix (pure code analysis, no game). Its diagnosis went deeper than the
+first hypothesis and was code-verified:
+
+> The skill `_aim_is` confirms only the target **cell** (x,y,z) and is **blind to
+> which face** the ray hits. `place_world`'s body-overlap back-off shoves the
+> player ~1 block north after the base course, so from there the reach-ray enters
+> each support's **vertical side face** — the server places at hit-cell +
+> `blocks_side_offset(NORTH)` = (0,0,−1), i.e. the block lands *beside* the
+> support at its own level, not on top. Hence only the first (top-face) block
+> lands → 1/3. Engine refs: `server_local.c:269-314`, `blocks_util.c:48-84`,
+> `screen_ingame.c:169-182`. The "shallow look" hypothesis was right in mechanism
+> but mislocated in cause.
+
+**Fix: pillar-jump.** Building *upward* by standing-and-placing is unreliable
+(side-face hits). `pillar_up(n)` instead stands ON the column, aims **straight
+down** at the block under the feet (always a TOP-face hit — proven by `dig_down`),
+JUMPs once, and PLACEs into the gap below during the airborne window (feet clear
++0.55; jump arc gives a ~7-tick window), confirming each course by the feet rising
+exactly one block. One JUMP edge per course + on-ground cooldown so two jumps
+never trip the ~10-tick double-tap creative-flight toggle.
+
+**Bonus bug (found by observing a planner run): calibration could silently fail.**
+A single LOOK probe occasionally reads ~0 (frame-boundary export lag), which left
+the bogus placeholder `gain_pitch=250.0` → pitch control ~40× too weak → all
+aim/build silently breaks on that run. `calibrate()` now takes the **median of
+several probes per axis** and falls back to the **known −2.0 constant** (never a
+placeholder) when a reading is implausible.
+
+**Result:** `stack_3` **1/3 → 3/3** (3 courses, feet +3, score 1.00) — vertical
+building fixed. Also confirmed the world-reuse speedup: the task ran in **4.7s**
+vs **67s** before (terrain is generated once per seed and copied in). Full-battery
+re-confirm follows once the in-flight planner run frees the game.
+
+**Follow-up (next round):** export `aim.side` (the engine already has
+`camera_hit.side`) and gate placement on a confirmed TOP-face hit — retro-hardens
+horizontal builds too.
+

@@ -220,23 +220,33 @@ class GameSession:
         return int(math.floor(p[0])), int(math.floor(p[2]))
 
     # -- calibration -------------------------------------------------------
+    DEFAULT_GAIN = -2.0   # measured look sensitivity (rad of orient per LOOK unit)
+
     def calibrate(self):
-        """Measure signed radians-of-orient per unit LOOK, so control is robust to
-        the unknown look-sensitivity constant. Done once, on flat spawn footing."""
-        y0 = self.yaw()
-        self.step("LOOK=0.10,0.0")
-        gy = _wrap(self.yaw() - y0) / 0.10
-        p0 = self.pitch()
-        self.step("LOOK=0.0,0.10")
-        gp = (self.pitch() - p0) / 0.10
-        # Undo the calibration pitch nudge so we start near level.
-        self.step("LOOK=0.0,%.3f" % (-0.10,))
-        if abs(gy) > 1e-3:
-            self.gain_yaw = gy
-        if abs(gp) > 1e-3:
-            self.gain_pitch = gp
-        self.log("calibrated gain_yaw=%.1f gain_pitch=%.1f (rad per LOOK)"
-                 % (self.gain_yaw, self.gain_pitch))
+        """Measure signed radians-of-orient per unit LOOK so control is robust to
+        the look-sensitivity config constant. The constant is fixed (~-2.0 here),
+        but a SINGLE measurement occasionally reads ~0 when it lands on a frame
+        boundary (export lag) -- which used to leave a bogus placeholder gain and
+        silently break all pitch control. So we take the median of several probes
+        per axis and fall back to the known constant when a reading is implausible
+        (never to a placeholder)."""
+        def measure(axis):
+            vals = []
+            for _ in range(3):
+                before = self.yaw() if axis == 0 else self.pitch()
+                self.step("LOOK=0.10,0.0" if axis == 0 else "LOOK=0.0,0.10")
+                after = self.yaw() if axis == 0 else self.pitch()
+                d = _wrap(after - before) if axis == 0 else (after - before)
+                vals.append(d / 0.10)
+                self.step("LOOK=-0.10,0.0" if axis == 0 else "LOOK=0.0,-0.10")
+            vals.sort()
+            return vals[len(vals) // 2]                  # median is spike-robust
+
+        gy, gp = measure(0), measure(1)
+        self.gain_yaw = gy if 0.5 <= abs(gy) <= 50 else self.DEFAULT_GAIN
+        self.gain_pitch = gp if 0.5 <= abs(gp) <= 50 else self.DEFAULT_GAIN
+        self.log("calibrated gain_yaw=%.2f gain_pitch=%.2f (raw %.2f/%.2f)"
+                 % (self.gain_yaw, self.gain_pitch, gy, gp))
         return self.gain_yaw, self.gain_pitch
 
     # -- orientation control ----------------------------------------------
@@ -488,6 +498,73 @@ class GameSession:
                         targets.append((x0 + i, y0 + h, z0 + j))
         return self.build_blocks(targets, item=item)
 
+    def pillar_up(self, n, item=3, retries=3):
+        """Build an n-high pillar UNDER the player by jump-and-place -- the human
+        "pillaring" technique, and the reliable way to build UPWARD.
+
+        Standing-and-placing fails for vertical stacks: the reach-ray hits the
+        support's vertical SIDE face (not its top), so the block lands beside it.
+        Here we instead stand ON the column and aim STRAIGHT DOWN at the block
+        below -- which always presents its TOP face (proven reliable by dig_down)
+        -- JUMP once, and PLACE into the gap below during the airborne window. Each
+        course is confirmed by the player's feet rising exactly one block.
+
+        One JUMP edge per course, with on-ground cooldown between attempts, so two
+        jumps never fall inside CavEX's ~10-tick double-tap creative-flight window.
+        Returns the number of courses confirmed risen."""
+        if not self.select(item):
+            return 0
+        risen = 0
+        for _ in range(n):
+            if self.state.get("flying"):
+                break                       # never want flight mode here
+            cx, cz = self.feet_column()
+            base_feet = round(self.pos()[1] - EYE_HEIGHT)   # current feet level y
+            course_ok = False
+            for _ in range(retries):
+                self._await_ground()
+                if self._jump_place_course(cx, cz, base_feet, item):
+                    course_ok = True
+                    break
+            if not course_ok:
+                break
+            risen += 1
+        return risen
+
+    def _await_ground(self, cap=20):
+        for _ in range(cap):
+            if self.state.get("on_ground"):
+                return True
+            self.step("")
+        return bool(self.state.get("on_ground"))
+
+    def _jump_place_course(self, cx, cz, base_feet, item):
+        """One jump-and-place course; True iff the feet rose one block."""
+        if not self.aim_at(cx, base_feet - 1, cz):   # straight down -> top face
+            return False
+        self.select(item)
+        self.step(""); self.step("")          # settle; widen the jump cooldown
+        self.step("JUMP=1")                   # exactly one rising edge
+        placed = False
+        for _ in range(14):
+            if self.state.get("flying"):
+                return False                  # accidental flight -> bail out
+            feet = self.pos()[1] - EYE_HEIGHT
+            # The new block lands at y=base_feet (occupies [base_feet, base_feet+1]);
+            # the player AABB bottom == feet, and the engine refuses a place that
+            # touches the body, so the feet must be STRICTLY above the block top.
+            # The jump apex (~+1.34) clears base_feet+1.05 for a ~5-tick window.
+            if (not placed and not self.state.get("on_ground")
+                    and feet >= base_feet + 1.05):
+                self.step("PLACE=1")
+                placed = True
+            else:
+                self.step("")                 # no JUMP (one edge), no LOOK (frozen)
+            if placed and self.state.get("on_ground"):
+                break
+        self.step("", settle=2)
+        return round(self.pos()[1] - EYE_HEIGHT) == base_feet + 1
+
 
 # ---------------------------------------------------------------------------
 # Self-test: prove mine + place mutate the world, end-to-end, headless.
@@ -536,16 +613,9 @@ def composite_selftest(run_dir, seed=42, quiet=False):
     r["floor"] = "%d/%d" % (placed, total)
     s.close()
 
-    # Build a 3-high pillar (vertical stacking).
+    # Build a 3-high pillar under the player (pillar-jump).
     s = GameSession(run_dir + "_pillar", seed=seed, quiet=quiet).start()
-    cx, cz = s.feet_column()
-    base = s.top_solid_y(0, 0) + 1
-    p = 0
-    for h in range(3):
-        if s.place_world(cx + 2, base + h, cz, item=3):
-            p += 1
-        else:
-            break
+    p = s.pillar_up(3, item=3)
     r["pillar"] = "%d/3" % p
     s.close()
     return r

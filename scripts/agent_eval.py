@@ -110,18 +110,14 @@ def t_place_one(s):
             "evidence": {}}
 
 
-@task("stack_3", "build a 3-high pillar (vertical stacking)")
+@task("stack_3", "build a 3-high pillar under the player (pillar-jump)")
 def t_stack_3(s):
-    cx, cz = s.feet_column()
-    base = s.top_solid_y(0, 0) + 1
-    n = 0
-    for h in range(3):
-        if s.place_world(cx + 2, base + h, cz, item=3):
-            n += 1
-        else:
-            break
-    return {"pass": n == 3, "score": n / 3.0, "detail": "%d/3 high" % n,
-            "evidence": {"height": n}}
+    feet0 = round(s.pos()[1] - sk.EYE_HEIGHT)     # starting feet level
+    n = s.pillar_up(3, item=3)
+    risen = round(s.pos()[1] - sk.EYE_HEIGHT) - feet0   # state-derived, not counted
+    return {"pass": n == 3 and risen == 3, "score": n / 3.0,
+            "detail": "%d/3 courses, feet +%d" % (n, risen),
+            "evidence": {"courses": n, "feet_rise": risen}}
 
 
 @task("floor_2x2", "build a 2x2 floor platform")
