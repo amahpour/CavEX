@@ -466,6 +466,28 @@ class GameSession:
             self.step("", settle=3)          # fall into the new hole, settle
         return broke
 
+    def build_floor(self, x0, z0, w, l, y, item=3):
+        """Fill a w x l platform of blocks at level ``y``, corner at (x0,z0)."""
+        targets = [(x0 + i, y, z0 + j) for i in range(w) for j in range(l)]
+        return self.build_blocks(targets, item=item)
+
+    def build_walls(self, x0, z0, w, l, height, item=3, y0=None, door=True):
+        """Build the perimeter walls of a w x l footprint, ``height`` blocks tall.
+
+        Corner at (x0,z0); optionally leave a 1-wide doorway in the south wall."""
+        if y0 is None:
+            y0 = self.top_solid_y(0, 0) + 1
+        door_cell = (x0 + w // 2, z0) if door else None
+        targets = []
+        for h in range(height):
+            for i in range(w):
+                for j in range(l):
+                    if i in (0, w - 1) or j in (0, l - 1):
+                        if h == 0 and door_cell == (x0 + i, z0 + j):
+                            continue                 # leave the doorway open
+                        targets.append((x0 + i, y0 + h, z0 + j))
+        return self.build_blocks(targets, item=item)
+
 
 # ---------------------------------------------------------------------------
 # Self-test: prove mine + place mutate the world, end-to-end, headless.

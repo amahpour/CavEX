@@ -20,7 +20,10 @@ import argparse
 import json
 import math
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import traceback
 
@@ -29,6 +32,21 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import agent_skills as sk
 
 TASKS = {}
+_WORLD_CACHE = {}
+
+
+def pregen_world(seed):
+    """Generate ONE scratch world for a seed and reuse it across tasks. World-gen
+    dominates per-task wall time, so the battery (and the improvement loop that
+    re-runs it many times) generates terrain once and copies it in."""
+    if seed in _WORLD_CACHE and os.path.isdir(_WORLD_CACHE[seed]):
+        return _WORLD_CACHE[seed]
+    tmp = tempfile.mkdtemp(prefix="cavex_world_seed%d_" % seed)
+    env = dict(os.environ, CAVEX_SEED=str(seed))
+    subprocess.run([sys.executable, os.path.join(ROOT, "gen_world.py"), tmp],
+                   check=True, stdout=subprocess.DEVNULL, env=env)
+    _WORLD_CACHE[seed] = os.path.join(tmp, "world")
+    return _WORLD_CACHE[seed]
 
 
 def task(name, desc):
@@ -137,7 +155,7 @@ def t_dig_down_2(s):
 
 
 # --- runner ----------------------------------------------------------------
-def run_task(name, seed=42, run_dir=None, autoshot=0, quiet=True):
+def run_task(name, seed=42, run_dir=None, autoshot=0, quiet=True, world=None):
     meta = TASKS[name]
     if run_dir is None:
         run_dir = "/tmp/cavex_eval_%s" % name
@@ -145,7 +163,8 @@ def run_task(name, seed=42, run_dir=None, autoshot=0, quiet=True):
     result = {"task": name, "desc": meta["desc"]}
     s = None
     try:
-        s = sk.GameSession(run_dir, seed=seed, autoshot=autoshot, quiet=quiet)
+        s = sk.GameSession(run_dir, seed=seed, autoshot=autoshot, quiet=quiet,
+                           world=world)
         s.start()
         out = meta["fn"](s)
         result.update(out)
@@ -162,11 +181,13 @@ def run_task(name, seed=42, run_dir=None, autoshot=0, quiet=True):
     return result
 
 
-def run_battery(names, seed=42, autoshot=0, quiet=True, log=True):
+def run_battery(names, seed=42, autoshot=0, quiet=True, log=True, reuse_world=True):
     results = []
+    world = pregen_world(seed) if reuse_world else None
     for name in names:
         r = run_task(name, seed=seed, autoshot=autoshot,
-                     run_dir="/tmp/cavex_eval_%s_%d" % (name, seed), quiet=quiet)
+                     run_dir="/tmp/cavex_eval_%s_%d" % (name, seed), quiet=quiet,
+                     world=world)
         results.append(r)
         if log:
             mark = "PASS" if r.get("pass") else "FAIL"
