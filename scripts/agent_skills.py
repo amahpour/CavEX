@@ -296,13 +296,22 @@ class GameSession:
         self.step("", settle=1)
         if self._aim_is(bx, by, bz):
             return True
-        # Refine: small pitch/yaw search to slide the crosshair onto the block.
-        for dp in (0.0, 0.05, -0.05, 0.1, -0.1, 0.15, -0.15):
-            for dyaw in (0.0, 0.04, -0.04, 0.08, -0.08):
-                self.turn_to(yaw_des + dyaw, pitch_des + dp, tol=0.02, max_ticks=20)
+        # Refine: a small pitch/yaw search to slide the crosshair onto the block.
+        # Bounded -- a 3x3 cross, short turns, and a hard tick budget. Calibrated
+        # geometry lands most aims first-try (above), so this only runs on occluded
+        # cells, where a tight search lands the same hits as a wide one but without
+        # the ~770-tick doomed-search tail that made builds crawl.
+        start = self.tick_count
+        for dp in (0.06, -0.06, 0.0):
+            for dyaw in (0.0, 0.05, -0.05):
+                if dp == 0.0 and dyaw == 0.0:
+                    continue                 # turn_to already converged here
+                self.turn_to(yaw_des + dyaw, pitch_des + dp, tol=0.02, max_ticks=8)
                 self.step("", settle=1)
                 if self._aim_is(bx, by, bz):
                     return True
+                if self.tick_count - start > 60:
+                    return False             # budget spent -> give up (no false place)
         return self._aim_is(bx, by, bz)
 
     def _aim_is(self, bx, by, bz):
@@ -383,13 +392,15 @@ class GameSession:
         return self._aim_is(bx, by, bz)
 
     # -- navigation --------------------------------------------------------
-    def goto(self, tx, tz, tol=0.7, max_ticks=300, level=True):
+    def goto(self, tx, tz, tol=0.7, max_ticks=80, level=True):
         """Walk to the centre of world column (tx,tz). Closed-loop steer toward
-        the heading with FORWARD held; auto-jumps when a step blocks progress.
+        the heading with FORWARD held; auto-jumps when a step blocks progress, and
+        gives up FAST when genuinely wedged (an enclosed stance) instead of
+        spinning to the cap -- the per-cell build-speed killer.
 
         Keeps the view near the horizon (``level``) for a natural human gait."""
         last = None
-        stuck = 0
+        no_progress = 0
         for _ in range(max_ticks):
             px, _, pz = self.pos()
             dx, dz = (tx + 0.5) - px, (tz + 0.5) - pz
@@ -404,13 +415,15 @@ class GameSession:
                              -0.10, 0.10)
             act = "FORWARD=1 LOOK=%.4f,%.4f" % (ldx, ldy)
             if last is not None and math.dist((px, pz), last) < 0.03:
-                stuck += 1
+                no_progress += 1
             else:
-                stuck = 0
+                no_progress = 0           # real progress: a long open walk never bails
             last = (px, pz)
-            if stuck >= 2:                 # not moving -> hop the obstacle/step
-                act += " JUMP=1"
-                stuck = 0
+            if no_progress >= 8:          # wedged -> stop fast (was a 300-tick spin)
+                self.step("")
+                return False
+            if no_progress and no_progress % 2 == 0:
+                act += " JUMP=1"          # hop the obstacle/step
             self.step(act)
         px, _, pz = self.pos()
         return math.hypot((tx + 0.5) - px, (tz + 0.5) - pz) <= tol

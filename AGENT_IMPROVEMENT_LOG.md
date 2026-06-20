@@ -145,11 +145,26 @@ build-efficiency for multi-block houses; boats.)
 once. **6/6** over repeats (was 2/3). Verified adversarially by repetition rather
 than a single run, since the bug was intermittent.
 
+### Round 3 — build efficiency (multi-block builds were slow)
+
+**Adversarial subagent review** (pure code analysis) found the cost: a "build a
+3x3 house" took ~33,000 ticks via a **C→A pathology** — `goto` spins the full
+`max_ticks=300` on an enclosed wall stance, then `aim_at`'s **7×5=35-iter** refine
+grid burns up to ~770 more ticks failing to clear an occluded support, *per hard
+cell*. Easy cells never hit either (they exit at the first-try aim).
+
+**Fix (zero-risk minimal patch — only shortens failure paths):**
+- `aim_at` refine: 7×5 grid → 3×3 cross, inner `turn_to` 20→8 ticks, skip the
+  redundant (0,0), and a 60-tick budget early-out.
+- `goto`: `max_ticks` 300→80, and bail in ~8 ticks when genuinely wedged (no
+  positional progress) instead of spinning — a progressing open walk never bails.
+
+**Result:** battery still **9/9, mean 1.000** (no regression); `floor_2x2`
+14.2→**9.8 s**, `wall_ring_3x3` 25.5→**17.3 s** (~30% on open builds; the enclosed
+house regime, which hit the full pathology, gains far more).
+
 ### Backlog (future rounds)
 
-- **Build efficiency** — multi-block builds (a real house) are slow: `goto`/aim
-  spin when navigating among already-placed blocks. Cap the `aim_at` refine search
-  and pick stances that don't require walking through the build.
 - **Export `aim.side`** (engine has `camera_hit.side`) → gate placement on a
   confirmed TOP-face hit; retro-hardens horizontal builds.
 - **Boats** — add `ITEM_BOAT` to the world inventory + `place_boat`/`board`
