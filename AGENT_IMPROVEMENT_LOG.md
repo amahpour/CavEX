@@ -163,6 +163,15 @@ cell*. Easy cells never hit either (they exit at the first-try aim).
 14.2→**9.8 s**, `wall_ring_3x3` 25.5→**17.3 s** (~30% on open builds; the enclosed
 house regime, which hit the full pathology, gains far more).
 
+**House validation (and a bug it surfaced):** end-to-end `build a 3x3 house` via
+the planner exposed a real bug — `build_walls` recomputed its base `y0` from
+`top_solid_y(0,0)` *after* the floor was placed, so the contaminated post-floor
+position gave the wrong wall height → 0/7 walls. Fixed by threading an explicit
+`y0=base+1` from the planner. Now: **floor 9/9, walls 5/7** (14/16 blocks — a real,
+mostly-complete house). The last 2 cells are elevated + enclosed wall stances —
+the build frontier that FIX 2/4 (skip-redundant-goto + outside stance) or
+pillar-jump-style wall courses would close. Tracked in the backlog.
+
 ### Backlog (future rounds)
 
 - **Export `aim.side`** (engine has `camera_hit.side`) → gate placement on a

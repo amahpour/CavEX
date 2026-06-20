@@ -88,7 +88,8 @@ Today there are **two planners** behind one interface:
 | Build walls / a hollow structure (1 high) | ✅ solid (`wall_ring_3x3` 8/8) |
 | Build **upward** (pillar) | ✅ `pillar_up` (jump-and-place) — fixed in round 1 |
 | Dig straight down | ✅ solid |
-| Build a *multi-storey* house fast | ⚠️ works but **slow** — building among placed blocks makes `goto`/aim spin (round-2 target) |
+| Build a house (floor + 1-high walls + door) | ⚠️ mostly — floor 9/9, walls 5/7 (the 2 elevated+enclosed wall cells are the frontier); ~3× faster after round 3 |
+| Multi-course (tall) walls | ⛔ `build_walls` places courses with `place_world` (side-face fails above the first); needs pillar-jump-style courses |
 | **Board / make a boat** | ⛔ needs a boat *item* in inventory + a place/board skill (the world has planks; crafting UI isn't in the action vocab). The agent can board a boat **it places** (it knows the cell) without any engine change. Planned. |
 | Open-ended goals | ✅ once you wire `llm_complete` (above) |
 
