@@ -71,6 +71,9 @@ SKILLS = {
         lambda s, a: {"ok": s.dig_down(a["n"]) == a["n"],
                       "detail": "%s deep" % a["n"]},
         "dig_down {n}: mine straight down n blocks"),
+    "make_boat": (
+        lambda s, a: {"ok": s.make_boat(), "detail": "place + board a boat"},
+        "make_boat {}: place a boat on the ground and ride it"),
 }
 
 
@@ -105,6 +108,10 @@ class TemplatePlanner:
             return [{"skill": "goto", "args": {"x": int(m.group(1)),
                                                "z": int(m.group(2))},
                      "note": "walk to the requested spot"}]
+
+        if "boat" in g:
+            return [{"skill": "make_boat", "args": {},
+                     "note": "place a boat on the ground and board it"}]
 
         if "dig" in g and "down" in g:
             n, _ = self._dims(g, (2, 2))

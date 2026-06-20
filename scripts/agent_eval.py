@@ -150,6 +150,13 @@ def t_dig_down_2(s):
             "evidence": {"depth": n}}
 
 
+@task("make_boat", "place a boat and board it (the 'create a boat' goal)")
+def t_make_boat(s):
+    ok = s.make_boat()
+    return {"pass": ok, "score": 1.0 if ok else 0.0,
+            "detail": "riding=%s" % s.riding(), "evidence": {"riding": s.riding()}}
+
+
 # --- runner ----------------------------------------------------------------
 def run_task(name, seed=42, run_dir=None, autoshot=0, quiet=True, world=None):
     meta = TASKS[name]

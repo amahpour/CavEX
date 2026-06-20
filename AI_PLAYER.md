@@ -21,7 +21,8 @@ turns an English goal into actions it executes and verifies. No engine shortcuts
 
 # ask the agent to do something — it plans, acts, and verifies, on an ISOLATED
 # scratch world (your real saves are never touched):
-python3 scripts/agent_planner.py --goal "build a 3x3 house"   --autoshot 6
+python3 scripts/agent_planner.py --goal "create a boat"        --autoshot 6
+python3 scripts/agent_planner.py --goal "build a 3x3 house"
 python3 scripts/agent_planner.py --goal "build a 5x4 floor"
 python3 scripts/agent_planner.py --goal "walk to 40 90"
 python3 scripts/agent_planner.py --goal "dig down 3"
@@ -90,7 +91,7 @@ Today there are **two planners** behind one interface:
 | Dig straight down | ✅ solid |
 | Build a house (floor + 1-high walls + door) | ⚠️ mostly — floor 9/9, walls 5/7 (the 2 elevated+enclosed wall cells are the frontier); ~3× faster after round 3 |
 | Multi-course (tall) walls | ⛔ `build_walls` places courses with `place_world` (side-face fails above the first); needs pillar-jump-style courses |
-| **Board / make a boat** | ⛔ needs a boat *item* in inventory + a place/board skill (the world has planks; crafting UI isn't in the action vocab). The agent can board a boat **it places** (it knows the cell) without any engine change. Planned. |
+| **Make + board a boat** ("create a boat") | ✅ `make_boat` — selects a boat item (now in the world), places it (spawns the boat entity), and boards it; confirmed via the `riding` flag. The agent boards the boat *it placed*, so no entity export is needed. Crafting from planks (a grid UI) isn't in the action vocab yet. |
 | Open-ended goals | ✅ once you wire `llm_complete` (above) |
 
 ## The improvement loop (the "training")

@@ -172,13 +172,29 @@ mostly-complete house). The last 2 cells are elevated + enclosed wall stances �
 the build frontier that FIX 2/4 (skip-redundant-goto + outside stance) or
 pillar-jump-style wall courses would close. Tracked in the backlog.
 
+### Round 4 — boats ("create a boat", the original ask) ✅
+
+The headline goal. CavEX boats are an **item** (`ITEM_BOAT` 333; craftable from 5
+planks) that spawns a rideable boat **entity** when placed; boarding sets the
+`riding` flag. Crafting needs a grid UI that isn't in the action vocab, so the
+pragmatic path: give the world a boat item (`gen_world.py` slot 6) and have the
+agent **place it and board the boat it just placed** — it knows the cell, so the
+missing nearby-entity export is irrelevant. `make_boat()`: select boat → aim at
+the ground → PLACE (confirmed by the item being **consumed** → the entity spawned)
+→ walk to the cell → use (confirmed by `riding`).
+
+**Result:** works end-to-end headless — boards on the first use (`riding: True`).
+Battery now **10/10, mean 1.000** (the boat-item addition didn't regress the other
+9). Wired as the `make_boat` eval task + a planner template, so
+`agent_planner.py --goal "create a boat"` does it.
+
 ### Backlog (future rounds)
 
 - **Export `aim.side`** (engine has `camera_hit.side`) → gate placement on a
-  confirmed TOP-face hit; retro-hardens horizontal builds.
-- **Boats** — add `ITEM_BOAT` to the world inventory + `place_boat`/`board`
-  (confirm via the `riding` flag); the agent boards a boat it placed without any
-  engine change.
+  confirmed TOP-face hit; retro-hardens horizontal builds + finishes enclosed
+  wall cells (the house's last 2).
+- **Taller walls / a proper roofed house** — `build_walls` height>1 needs
+  pillar-jump-style courses (vertical `place_world` hits the side face).
 - **Wire `llm_complete`** to the Anthropic API so fully open-ended goals plan
   themselves (the seam exists; falls back to the template planner offline).
 

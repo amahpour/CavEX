@@ -588,6 +588,38 @@ class GameSession:
         self.step("", settle=2)
         return round(self.pos()[1] - EYE_HEIGHT) == base_feet + 1
 
+    def make_boat(self, bx=None, bz=None, item=333):
+        """Craft-free "create a boat": select a boat item, place it on the ground
+        ahead (placing the item spawns the rideable boat entity and consumes the
+        item), then board it. Confirms placement by the item being consumed and
+        boarding by the exported ``riding`` flag -- and because the agent placed
+        the boat it knows the cell, so no nearby-entity export is needed.
+        Returns True once riding."""
+        if not self.select(item):
+            return False
+        cx, cz = self.feet_column()
+        if bx is None:
+            bx, bz = cx + 1, cz                 # default: one block ahead (east)
+        sy = self.top_solid_y(bx - cx, bz - cz)
+        if sy is None:
+            return False
+        if not self.aim_at(bx, sy, bz):
+            return False
+        before = self.hotbar().get("count", 0)
+        self.step("PLACE=1")
+        self.step("", settle=3)                 # let the boat entity spawn
+        hb = self.hotbar()
+        if hb.get("item") == item and hb.get("count", 0) >= before:
+            return False                        # item not consumed -> not placed
+        # Board: stand by the boat's cell and use until aboard.
+        self.goto(bx, bz, tol=0.9)
+        for _ in range(10):
+            self.step("PLACE=1")
+            self.step("", settle=2)
+            if self.riding():
+                return True
+        return self.riding()
+
 
 # ---------------------------------------------------------------------------
 # Self-test: prove mine + place mutate the world, end-to-end, headless.
