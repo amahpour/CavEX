@@ -195,6 +195,26 @@ boat"` does it.
 > same hazard as [[overnight-pr-proof-of-play-images]] (proof tooling must not
 > change the path it's proving).
 
+### Round 5 — watchable live play + proof GIFs
+
+Made the agent **watchable in real time** and produced GIF proof:
+- `scripts/agent_live.py` + `GameSession(visible=True)` open a real window and
+  drive the agent ONE skill at a time over a command pipe — the brain is the LLM
+  in the harness (or `llm_complete`→Anthropic API), **not** a regex planner; the
+  skills are the toolbox. The world idles a neutral tick between commands so the
+  window animates instead of freezing.
+- **Bug found by watching it live:** `goto`'s recovery-jumps could double-tap into
+  creative flight on rough terrain and send the walker airborne — the flat-ground
+  `walk_to` eval never saw it. Fixed with a 13-tick jump cooldown (> the ~10-tick
+  double-tap window). Confirmed: a 4-leg walk now reaches 4/4, `flying=False`.
+- **autoshot** (dev-rig) dumped a PNG *every tick* in agent mode — heavy per-tick
+  I/O. Now dumps every Nth tick (`main.c`). Builds + navigation capture cleanly;
+  the boat's *boarding* is still too autoshot-sensitive to GIF (the framebuffer
+  read perturbs the render-time aim), so the headless **10/10** battery stays the
+  verification for it. (Same hazard family as [[overnight-pr-proof-of-play-images]].)
+- Proof on **PR #100**: a walled-hut build (with a step-back reveal) and a 4-leg
+  navigation walk, both captured through the live input path.
+
 ### Backlog (future rounds)
 
 - **Export `aim.side`** (engine has `camera_hit.side`) → gate placement on a
