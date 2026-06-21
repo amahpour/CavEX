@@ -73,13 +73,14 @@ class GameSession:
     """
 
     def __init__(self, run_dir, seed=42, autoshot=0, world=None, binary=None,
-                 quiet=True):
+                 quiet=True, visible=False):
         self.run_dir = run_dir
         self.seed = seed
         self.autoshot = autoshot
         self.world = world
         self.binary = binary or os.path.join(ROOT, "build_pc", "cavex")
         self.quiet = quiet
+        self.visible = visible    # show a real window (don't force the headless path)
         self.proc = None
         self.state = None
         self.tick_count = 0
@@ -96,8 +97,13 @@ class GameSession:
         os.makedirs(self.run_dir, exist_ok=True)
         apd.make_run_dir(self.world, self.run_dir, seed=self.seed)
         env = dict(os.environ)
-        env.update(CAVEX_AGENT="1", CAVEX_AGENT_GATED="1", CAVEX_AUTOPLAY="1",
-                   vblank_mode="0")
+        env.update(CAVEX_AGENT="1", CAVEX_AGENT_GATED="1", CAVEX_AUTOPLAY="1")
+        # vblank_mode=0 is REQUIRED here (GLX init/SwapBuffers hangs without it on
+        # this Mesa/Xwayland setup) -- it only disables vsync, it does NOT hide the
+        # window. So we always set it; a real window still appears whenever there's
+        # a DISPLAY. `visible` just documents that this session is meant to be
+        # watched (and, with a DISPLAY set by the caller, it is).
+        env["vblank_mode"] = "0"
         if self.autoshot > 0:
             env["CAVEX_AUTOSHOT"] = str(self.autoshot)
         self.proc = subprocess.Popen(
@@ -401,7 +407,10 @@ class GameSession:
         Keeps the view near the horizon (``level``) for a natural human gait."""
         last = None
         no_progress = 0
+        jump_cd = 0
         for _ in range(max_ticks):
+            if jump_cd > 0:
+                jump_cd -= 1
             px, _, pz = self.pos()
             dx, dz = (tx + 0.5) - px, (tz + 0.5) - pz
             if math.hypot(dx, dz) <= tol:
@@ -422,8 +431,13 @@ class GameSession:
             if no_progress >= 8:          # wedged -> stop fast (was a 300-tick spin)
                 self.step("")
                 return False
-            if no_progress and no_progress % 2 == 0:
-                act += " JUMP=1"          # hop the obstacle/step
+            # Hop an obstacle, but ONE jump per cooldown so two jumps never land
+            # inside CavEX's ~10-tick double-tap window -- which would toggle
+            # creative flight and send the walker airborne (seen live on terraced
+            # terrain; the flat-ground walk_to eval never tripped it).
+            if no_progress >= 2 and jump_cd == 0:
+                act += " JUMP=1"
+                jump_cd = 13
             self.step(act)
         px, _, pz = self.pos()
         return math.hypot((tx + 0.5) - px, (tz + 0.5) - pz) <= tol

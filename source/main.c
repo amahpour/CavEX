@@ -478,8 +478,18 @@ int main(void) {
 #ifdef PLATFORM_PC
 			bool demo_active = input_get_virtual_source() != NULL;
 			if(autoshot_every > 0 && demo_active && demo_ticks_this_frame > 0) {
-				first_tick = demo_tick - demo_ticks_this_frame;
-				last_tick_excl = demo_tick;
+				// Dump every Nth demo tick, NOT every tick. A per-tick framebuffer
+				// read + PNG encode is heavy enough to perturb the gated tick
+				// cadence -- which corrupts aim-dependent skills (place/mine/board
+				// mis-aim). Dumping every Nth tick keeps the I/O light (so capture
+				// no longer changes behaviour) and gives a controllable GIF rate.
+				for(int t = demo_tick - demo_ticks_this_frame; t < demo_tick; t++) {
+					if(t % autoshot_every == 0) {
+						first_tick = t;
+						last_tick_excl = t + 1;   // one shot at this Nth tick
+						break;
+					}
+				}
 			}
 #else
 			bool demo_active = false;
