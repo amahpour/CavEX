@@ -19,7 +19,11 @@ two files under <dir> (default /tmp/cavex_live):
 
 Verbs (each = one closed-loop, state-confirmed skill):
   goto X Z | mine X Y Z | place X Y Z [item] | make_boat | dig_down N |
-  pillar_up N | build_floor X0 Z0 W L [item] | look | quit
+  pillar_up N | build_floor X0 Z0 W L [item] | build_walls X0 Z0 W L H [item] |
+  level_pad X0 Z0 W L [cap_item] | build_pad X0 Z0 W L [foundation] [wall] |
+  look | quit
+(level_pad flattens terraced/sloped ground to one plane so big floors complete;
+ build_pad = level_pad + foundation + a walled shell, in one command.)
 
 Usage:  python3 scripts/agent_live.py [dir] [--seed N]
 """
@@ -75,10 +79,43 @@ def main():
         if verb == "pillar_up":
             return s.pillar_up(int(a[0])) == int(a[0])
         if verb == "build_floor":
-            base = s.top_solid_y(0, 0) + 1
-            p, t = s.build_floor(int(a[0]), int(a[1]), int(a[2]), int(a[3]),
-                                 base, item=int(a[4]) if len(a) > 4 else 3)
-            return p == t
+            x0, z0, w, l = int(a[0]), int(a[1]), int(a[2]), int(a[3])
+            s.goto(x0 + w // 2, z0 + l // 2)   # stand ON the site, not a stale stance
+            gy, spread = s.local_ground_y()    # survey HERE: base tracks the site
+            base = gy + 1
+            p, t = s.build_floor(x0, z0, w, l, base,
+                                 item=int(a[4]) if len(a) > 4 else 3)
+            return "%d/%d@y%d(spread%d)" % (p, t, base, spread)
+        if verb == "build_walls":
+            x0, z0, w, l = int(a[0]), int(a[1]), int(a[2]), int(a[3])
+            s.goto(x0 + w // 2, z0 + l // 2)   # walk to the site first
+            gy, spread = s.local_ground_y()    # now reads the floor we just laid
+            base = gy + 1
+            p, t = s.build_walls(x0, z0, w, l, int(a[4]),
+                                 item=int(a[5]) if len(a) > 5 else 3,
+                                 y0=base, door=True)
+            return "%d/%d@y%d(spread%d)" % (p, t, base, spread)
+        if verb == "level_pad":          # terraform a footprint flat (mine highs)
+            x0, z0, w, l = int(a[0]), int(a[1]), int(a[2]), int(a[3])
+            cap = int(a[4]) if len(a) > 4 else None
+            lev, tot, tgt = s.level_pad(x0, z0, w, l, cap_item=cap)
+            return "%d/%d@y%s" % (lev, tot, tgt)
+        if verb == "build_pad":          # flatten -> foundation -> walls, in one go
+            x0, z0, w, l = int(a[0]), int(a[1]), int(a[2]), int(a[3])
+            foundation = int(a[4]) if len(a) > 4 else 1
+            wall = int(a[5]) if len(a) > 5 else 5
+            lev, tot, tgt = s.level_pad(x0, z0, w, l, cap_item=foundation)
+            p, t = s.build_walls(x0, z0, w, l, 1, item=wall,
+                                 y0=tgt + 2, door=True)
+            return "lvl %d/%d walls %d/%d @y%s" % (lev, tot, p, t, tgt)
+        if verb == "face":               # turn to look at a block (for a reveal)
+            return s.aim_at(int(a[0]), int(a[1]), int(a[2]))
+        if verb == "act":                # raw action line, repeated N ticks
+            n = int(a[-1]) if a and a[-1].isdigit() else 1
+            body = a[:-1] if (a and a[-1].isdigit()) else a
+            for _ in range(n):
+                s.step(" ".join(body))
+            return True
         if verb == "look":
             return True
         raise ValueError("unknown verb %r" % verb)

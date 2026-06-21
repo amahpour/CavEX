@@ -215,8 +215,85 @@ Made the agent **watchable in real time** and produced GIF proof:
 - Proof on **PR #100**: a walled-hut build (with a step-back reveal) and a 4-leg
   navigation walk, both captured through the live input path.
 
+### Round 6 — the "staring at the sky" bug (found by watching live) ✅
+
+The user, watching a live build, called it before the data did: *"you keep going
+around in circles and staring at the sky."* That weirdness was the reward signal.
+Reading the run results frame-by-frame confirmed it: a `build_walls` aimed every
+block at `y:70` while the player's feet were at `~67` — the crosshair literally
+pointed into the sky → **0/35**; a `build_floor` after the avatar climbed a hill
+to feet `~71` aimed at `y:70` buried in the slope.
+
+**Root cause (one cause, both symptoms):** build height (`base` Y) was taken from
+`top_solid_y(0,0)` — the topmost block in the player's **current column**,
+wherever the previous command left them. On the flat eval worlds stance == site,
+so rounds 1–5 never saw it. Live, on terraced forest terrain, the player wandered
+onto a hill and every target Y floated above the real columns (sky-aim) or buried
+below them. The planner's old "thread explicit y0" fix never reached the **live**
+dispatch, which still recomputed `base` from the contaminated stance.
+
+**Fix:** `GameSession.local_ground_y()` → median top-solid Y (+ flatness spread)
+over the local heightmap, read **at the build site** (walk there first), so build
+height tracks the ground you're building on, never a transient stance. The live
+dispatch now does `goto(site center) → local_ground_y() → base` for floor/walls
+(surveying walls *after* the floor self-corrects: it reads the floor as the new
+ground). Plus a **sky-aim guard** in `place_block` that refuses (fast, logged)
+when the support is >1.5 above the feet — the cheap signal to re-survey instead of
+craning at the sky. `pillar_up` builds upward via its own path, so it's unaffected.
+
+**Result (proven live on terraced terrain):** **0 sky-aim guard fires**, no more
+craning at the sky; `build_walls` **17/19** (vs the old house's 5/7), all at the
+correct surveyed height; built a 6×6 plank cabin (stone floor + door + two
+glowstone interior lights) end-to-end through the fixed pipeline. Lesson banked as
+the `cavex-build-site-survey` memory.
+
+**New frontier surfaced (the loop continuing):** terraced terrain still leaves
+*floor* gaps — a down-step column has no support block, so a single-level flat
+slab can't complete there (correctly *skipped*, not sky-aimed). The next
+iterations: a **terraform/`level_pad`** skill (mine highs / fill lows to one
+plane before laying the floor) for clean big footprints, and a reliable
+**build-upward** primitive (stand-on-structure or `aim.side`-gated top-face) so
+walls go >1 high and roofs become possible.
+
+### Round 7 — `level_pad` terraform + a creative-flight bug caught on camera
+
+Started the terraform skill to unblock big builds on terraced ground. The loop
+ran hot here — three iterations, and the decisive bug was found by *looking at a
+frame*, exactly the Round-6 lesson again:
+
+- **v1** (walk onto every column, `dig_down` the excess): **8/16**. Survey only
+  reached 11/16 — standing *exactly* on each column is imprecise (goto drifts).
+- **v2** (stand at tile centres, read the 5×5 heightmap, mine excess from the
+  stance — also clears trees for free): **9/25**. Denser **overlapping** stances
+  (every column within ±1 of a stance) lifted survey coverage but leveling was
+  still ~10/16.
+- **Root cause (a frame showed `FLYING` on the debug overlay):** level_pad fires
+  dozens of back-to-back `goto`/`dig` calls, and the Round-5 jump cooldown was
+  **per-goto-call** — two recovery-jumps astride a call boundary slipped inside
+  CavEX's ~10-tick double-tap window and toggled **creative flight**. Airborne,
+  every ground-relative read (feet column, heightmap) is meaningless, so survey
+  and leveling silently produced garbage.
+- **Fix:** a **session-global** last-jump tick (cooldown holds across all calls,
+  not just within one goto) + `_unfly()` recovery (double-tap to toggle flight
+  back off, confirmed via the `flying` flag) + `goto` refuses to navigate while
+  airborne. This hardens *all* navigation, not just terraform.
+- **Result:** survey **10–13/25 → 25/25**, leveled **9/25 → 19/25** (76% on a
+  2-block-spread site), no flight; produces a visibly flat stone pad carved into
+  the terraced hillside.
+
+**Honest status:** the terraform works and is reliable enough to *flatten*, but
+76% isn't flat enough to *chain* into a clean walled shell — the ~24% of columns
+still a step high leave the capped foundation at spread 2, so `build_walls`'
+sky-aim guard correctly refuses most of it (1/15). Closing that last quarter
+(the +2 columns / corner reach, then re-survey the cap before walling) is the
+next iteration. The flight fix and the survey-at-site fix both shipped.
+
 ### Backlog (future rounds)
 
+- **`level_pad` completeness** — push leveling 76% → ~100% (mine the +2 columns
+  reliably from a corner-adjacent stance; re-survey the cap before walling) so
+  flatten→foundation→walls chains cleanly into a big house. Optionally a
+  dedicated tree-clear pass before leveling.
 - **Export `aim.side`** (engine has `camera_hit.side`) → gate placement on a
   confirmed TOP-face hit; retro-hardens horizontal builds + finishes enclosed
   wall cells (the house's last 2).

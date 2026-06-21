@@ -84,6 +84,12 @@ class GameSession:
         self.proc = None
         self.state = None
         self.tick_count = 0
+        # Session-global last-JUMP tick. The double-tap-to-fly toggle (~10 ticks)
+        # doesn't reset between goto() calls, so the cooldown can't either: an
+        # intensive skill (level_pad does dozens of gotos + digs) would otherwise
+        # land two jumps astride a call boundary and flip on creative flight,
+        # which corrupts every ground-relative read. Tracked here, not per-call.
+        self._last_jump_tick = -100
         # Calibrated at start(): signed radians of orient change per 1.0 LOOK unit.
         self.gain_yaw = -250.0    # placeholder; replaced by calibrate()
         self.gain_pitch = 250.0   # placeholder; replaced by calibrate()
@@ -224,6 +230,27 @@ class GameSession:
         """Integer (x, z) block column the player stands in."""
         p = self.pos()
         return int(math.floor(p[0])), int(math.floor(p[2]))
+
+    def local_ground_y(self):
+        """Stance-relative SITE ground level: the (median top-solid y, spread)
+        over the local heightmap window.
+
+        Read this *at the build site* (walk there first) so build height tracks
+        the ground you're about to build ON -- never a transient stance left on a
+        hill by a previous command. That stance-vs-site mismatch is the root of
+        the "avatar cranes up at the sky, 0/N placed" failure: build height was
+        taken from top_solid_y(0,0) wherever the player happened to stop, so on
+        sloped terrain every target Y floated above (sky-aim) or buried below the
+        actual columns. The median is robust to a stray tree/pit in the window;
+        the spread tells the caller how flat the site is."""
+        hm = self.heightmap()
+        if hm is None:
+            p = self.pos()
+            return int(round(p[1] - EYE_HEIGHT)), 0
+        vals = sorted(hm)
+        median_first_air = vals[len(vals) // 2]
+        spread = vals[-1] - vals[0]
+        return median_first_air - 1, spread   # (top-solid y, flatness spread)
 
     # -- calibration -------------------------------------------------------
     DEFAULT_GAIN = -2.0   # measured look sensitivity (rad of orient per LOOK unit)
@@ -383,6 +410,20 @@ class GameSession:
         if item is not None and not self.select(item):
             return False
         support = (bx, by - 1, bz)            # build on top of the block beneath
+        # Sky-aim guard. Floors/walls always place onto a support at, or just
+        # below, the feet. A support well ABOVE the feet means the build height
+        # came from a bad (hill) stance -- the avatar would crane up at the sky
+        # and the place would fail anyway. Bail fast and loud, the cheap signal
+        # that a build height needs re-surveying, instead of burning the budget
+        # aiming at nothing. (pillar_up builds upward via its own straight-down
+        # jump-place path, not place_block, so this never blocks legit height.)
+        _, py, _ = self.pos()
+        feet_y = py - EYE_HEIGHT
+        if (by - 1) - feet_y > 1.5:
+            self.log("place_block: support y=%d is %.1f above feet -- sky-aim "
+                     "guard, refusing (re-survey build height)"
+                     % (by - 1, (by - 1) - feet_y))
+            return False
         if not self.aim_at(*support):
             return False
         cx, cz = self.feet_column()
@@ -398,6 +439,24 @@ class GameSession:
         return self._aim_is(bx, by, bz)
 
     # -- navigation --------------------------------------------------------
+    def _unfly(self, tries=3):
+        """Recover from accidental creative flight by double-tapping JUMP (the
+        same gesture that toggled it on), confirmed via the ``flying`` flag, then
+        wait out the fall. Ground-relative reads (pos, heightmap) are meaningless
+        while airborne, so navigation calls this before trusting them."""
+        for _ in range(tries):
+            if not self.state.get("flying"):
+                return True
+            self.step("JUMP=1")
+            self.step("")                 # release, so the next is a fresh edge
+            self.step("JUMP=1")           # second tap within the double-tap window
+            self.step("", settle=2)
+            for _ in range(20):           # let the drop back to ground finish
+                if self.state.get("on_ground"):
+                    break
+                self.step("")
+        return not self.state.get("flying")
+
     def goto(self, tx, tz, tol=0.7, max_ticks=80, level=True):
         """Walk to the centre of world column (tx,tz). Closed-loop steer toward
         the heading with FORWARD held; auto-jumps when a step blocks progress, and
@@ -407,10 +466,9 @@ class GameSession:
         Keeps the view near the horizon (``level``) for a natural human gait."""
         last = None
         no_progress = 0
-        jump_cd = 0
         for _ in range(max_ticks):
-            if jump_cd > 0:
-                jump_cd -= 1
+            if self.state.get("flying"):
+                self._unfly()            # never navigate (or jump) while airborne
             px, _, pz = self.pos()
             dx, dz = (tx + 0.5) - px, (tz + 0.5) - pz
             if math.hypot(dx, dz) <= tol:
@@ -431,13 +489,14 @@ class GameSession:
             if no_progress >= 8:          # wedged -> stop fast (was a 300-tick spin)
                 self.step("")
                 return False
-            # Hop an obstacle, but ONE jump per cooldown so two jumps never land
-            # inside CavEX's ~10-tick double-tap window -- which would toggle
-            # creative flight and send the walker airborne (seen live on terraced
-            # terrain; the flat-ground walk_to eval never tripped it).
-            if no_progress >= 2 and jump_cd == 0:
+            # Hop an obstacle, but keep two jumps >13 ticks apart GLOBALLY (across
+            # goto/dig calls, not just within this one) so they never land inside
+            # CavEX's ~10-tick double-tap window -- which would toggle creative
+            # flight and send the walker airborne (seen live during level_pad's
+            # many back-to-back gotos; the per-call cooldown couldn't see it).
+            if no_progress >= 2 and (self.tick_count - self._last_jump_tick) >= 13:
                 act += " JUMP=1"
-                jump_cd = 13
+                self._last_jump_tick = self.tick_count
             self.step(act)
         px, _, pz = self.pos()
         return math.hypot((tx + 0.5) - px, (tz + 0.5) - pz) <= tol
@@ -534,6 +593,100 @@ class GameSession:
                             continue                 # leave the doorway open
                         targets.append((x0 + i, y0 + h, z0 + j))
         return self.build_blocks(targets, item=item)
+
+    def _footprint_columns(self, x0, z0, w, l):
+        """Boustrophedon (snake) order over a w x l footprint, so consecutive
+        columns are always neighbours -- the walker never crosses the whole pad
+        between two columns, and on terraced ground the step between neighbours
+        stays small (one terrace), which goto can climb."""
+        cols = []
+        for j in range(l):
+            row = [(x0 + i, z0 + j) for i in range(w)]
+            if j % 2:                       # serpentine: reverse every other row
+                row.reverse()
+            cols.extend(row)
+        return cols
+
+    def _tile_centers(self, x0, z0, w, l):
+        """Stance points covering the footprint with OVERLAP: spaced every 3 so
+        each column sits within +/-1 of some stance. +/-1 keeps every mined
+        column close (reliable aim/reach) and the overlap means a single off-by-
+        one landing can't drop a column from coverage -- the v1/v2 failure where
+        one stance per 5-span lost its edge columns whenever goto drifted."""
+        def axis(a0, n):
+            cs = list(range(a0 + 1, a0 + n, 3))     # a0+1, a0+4, ... each covers +/-1
+            if not cs:
+                return [a0]
+            if cs[-1] < a0 + n - 2:                 # ensure the far edge is covered
+                cs.append(a0 + n - 2)
+            return cs
+        return [(cx, cz) for cz in axis(z0, l) for cx in axis(x0, w)]
+
+    def level_pad(self, x0, z0, w, l, target=None, cap_item=None, max_cut=8):
+        """Terraform a w x l footprint to ONE flat plane.
+
+        This closes the Round-6 cap: on terraced/sloped ground a single-level
+        floor leaves gaps, because a down-step column has no support block to
+        place onto. Rather than fight that, flatten the ground first.
+
+        Mining-only, therefore reliable: the target plane defaults to the LOWEST
+        surveyed column, so every other column is dug DOWN to it (digging is
+        proven; filling UP would hit the side-face stacking problem pillar_up
+        exists to avoid). To avoid the precision trap of standing on every
+        column (v1: only ~half landed exactly), we instead stand at a few tile
+        centres, read the 5x5 heightmap, and MINE each in-window column's excess
+        from that stance -- which also clears any trees rooted in the footprint
+        for free. Caps the flat plane with an optional ``cap_item`` foundation.
+
+        Returns (leveled_columns, total_columns, target_y)."""
+        centers = self._tile_centers(x0, z0, w, l)
+        in_fp = lambda x, z: x0 <= x < x0 + w and z0 <= z < z0 + l
+        # -- survey: read each tile's heightmap window into a column->top map --
+        heights = {}
+        for (cx, cz) in centers:
+            self.goto(cx, cz, tol=0.7)
+            fx, fz = self.feet_column()
+            hm = self.heightmap()
+            if not hm:
+                continue
+            for r in range(WINDOW):
+                for c in range(WINDOW):
+                    wx, wz = fx + (c - HALF), fz + (r - HALF)
+                    if in_fp(wx, wz):
+                        heights[(wx, wz)] = hm[r * WINDOW + c] - 1
+        if not heights:
+            return 0, w * l, None
+        tgt = target if target is not None else min(heights.values())
+        self.log("level_pad: surveyed %d/%d cols, target y=%d (range %d..%d)"
+                 % (len(heights), w * l, tgt,
+                    min(heights.values()), max(heights.values())))
+        # -- dig: from each tile centre, mine every in-window column down to tgt
+        #    (top block first; the centre column itself goes straight down) --
+        leveled = set()
+        for (cx, cz) in centers:
+            self.goto(cx, cz, tol=0.7)
+            fx, fz = self.feet_column()
+            window = [(wx, wz) for (wx, wz) in heights
+                      if abs(wx - fx) <= 1 and abs(wz - fz) <= 1]
+            for (wx, wz) in window:
+                if (wx, wz) == (fx, fz):
+                    continue                 # the stance column: handled below
+                cur = self.top_solid_y(wx - fx, wz - fz)
+                cut = 0
+                while cur is not None and cur > tgt and cut < max_cut:
+                    if not self.mine_block(wx, cur, wz):
+                        break
+                    cur = self.top_solid_y(wx - fx, wz - fz)
+                    cut += 1
+                if cur is not None and cur <= tgt:
+                    leveled.add((wx, wz))
+            if in_fp(fx, fz) and (self.top_solid_y(0, 0) or tgt) > tgt:
+                self.dig_down(self.top_solid_y(0, 0) - tgt)
+                if self.top_solid_y(0, 0) <= tgt:
+                    leveled.add((fx, fz))
+        if cap_item is not None:
+            self.build_floor(x0, z0, w, l, tgt + 1, item=cap_item)
+        return len(leveled), w * l, tgt
 
     def pillar_up(self, n, item=3, retries=3):
         """Build an n-high pillar UNDER the player by jump-and-place -- the human
