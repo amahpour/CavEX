@@ -40,6 +40,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import agent_play_demo as apd  # make_run_dir (isolated scratch world)
+import nav                      # pure A* path planner (round 8 navigation fix)
+import mem_guard                # OOM safeguard: gate launch + abort before OOM
 
 EYE_HEIGHT = 1.62
 WINDOW = 5            # heightmap window side (STATE_EXPORT_HEIGHT_WINDOW)
@@ -73,7 +75,8 @@ class GameSession:
     """
 
     def __init__(self, run_dir, seed=42, autoshot=0, world=None, binary=None,
-                 quiet=True, visible=False):
+                 quiet=True, visible=False, mem_floor_mb=None,
+                 mem_launch_floor_mb=None):
         self.run_dir = run_dir
         self.seed = seed
         self.autoshot = autoshot
@@ -84,6 +87,19 @@ class GameSession:
         self.proc = None
         self.state = None
         self.tick_count = 0
+        # OOM safeguard (the user's machine has repeatedly OOM-crashed under heavy
+        # runs). Refuse to launch below mem_launch_floor_mb; a watchdog aborts the
+        # game if MemAvailable later falls below mem_floor_mb. Override via env so
+        # any entrypoint (live driver, playtest) inherits one knob.
+        self.mem_floor_mb = int(mem_floor_mb if mem_floor_mb is not None
+                                else os.environ.get("CAVEX_MEM_FLOOR_MB",
+                                                    mem_guard.DEFAULT_CRITICAL_FLOOR_MB))
+        self.mem_launch_floor_mb = int(
+            mem_launch_floor_mb if mem_launch_floor_mb is not None
+            else os.environ.get("CAVEX_MEM_LAUNCH_FLOOR_MB",
+                                mem_guard.DEFAULT_LAUNCH_FLOOR_MB))
+        self._mem_guard = None
+        self._mem_tripped = False
         # Session-global last-JUMP tick. The double-tap-to-fly toggle (~10 ticks)
         # doesn't reset between goto() calls, so the cooldown can't either: an
         # intensive skill (level_pad does dozens of gotos + digs) would otherwise
@@ -100,6 +116,13 @@ class GameSession:
             print("[skills] " + msg, file=sys.stderr, flush=True)
 
     def start(self):
+        # OOM safeguard: refuse to even generate the world / spawn the game when
+        # there isn't enough headroom -- a heavy run on a near-full box is exactly
+        # what has OOM-crashed this machine.
+        ok, msg = mem_guard.safe_to_launch(self.mem_launch_floor_mb)
+        self.log(msg)
+        if not ok:
+            raise SkillError(msg)
         os.makedirs(self.run_dir, exist_ok=True)
         apd.make_run_dir(self.world, self.run_dir, seed=self.seed)
         env = dict(os.environ)
@@ -115,12 +138,29 @@ class GameSession:
         self.proc = subprocess.Popen(
             [self.binary], cwd=self.run_dir, env=env, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        # Arm the watchdog: if MemAvailable later falls below the floor, kill the
+        # game so the box never reaches the kernel OOM-killer. step() then aborts.
+        self._mem_guard = mem_guard.MemGuard(
+            pid=self.proc.pid, floor_mb=self.mem_floor_mb, interval=1.0,
+            on_low=self._on_mem_low, log=self.log)
+        self._mem_guard.start()
         self.state = self._read_state()
         if self.state is None:
             raise SkillError("game produced no state line on startup")
         self.wait_for_world()
         self.calibrate()
         return self
+
+    def _on_mem_low(self, avail_mb):
+        """Watchdog callback: memory hit the floor -> abort the game now."""
+        self._mem_tripped = True
+        self.log("mem_guard: aborting game pid %s at %d MiB available"
+                 % (getattr(self.proc, "pid", "?"), avail_mb))
+        try:
+            if self.proc and self.proc.poll() is None:
+                self.proc.terminate()
+        except Exception:
+            pass
 
     def _read_state(self):
         """Read stdout until the next JSON state line; skip engine chatter."""
@@ -148,9 +188,15 @@ class GameSession:
         ``settle`` extra neutral ticks let the ~1-frame-late ``aim`` catch up to a
         just-finished turn before a caller inspects it.
         """
+        if self._mem_tripped:
+            raise SkillError("aborted: memory guard tripped (low RAM) -- game killed "
+                             "to protect the machine from OOM")
         self._send(action)
         nxt = self._read_state()
         if nxt is None:
+            if self._mem_tripped:
+                raise SkillError("aborted: memory guard tripped (low RAM) -- game "
+                                 "killed to protect the machine from OOM")
             raise SkillError("game ended mid-run (EOF)")
         self.state = nxt
         self.tick_count += 1
@@ -172,6 +218,9 @@ class GameSession:
         return self.state
 
     def close(self):
+        if self._mem_guard is not None:
+            self._mem_guard.stop()
+            self._mem_guard = None
         if not self.proc:
             return
         try:
@@ -457,49 +506,105 @@ class GameSession:
                 self.step("")
         return not self.state.get("flying")
 
-    def goto(self, tx, tz, tol=0.7, max_ticks=80, level=True):
-        """Walk to the centre of world column (tx,tz). Closed-loop steer toward
-        the heading with FORWARD held; auto-jumps when a step blocks progress, and
-        gives up FAST when genuinely wedged (an enclosed stance) instead of
-        spinning to the cap -- the per-cell build-speed killer.
-
-        Keeps the view near the horizon (``level``) for a natural human gait."""
-        last = None
-        no_progress = 0
-        for _ in range(max_ticks):
-            if self.state.get("flying"):
-                self._unfly()            # never navigate (or jump) while airborne
-            px, _, pz = self.pos()
-            dx, dz = (tx + 0.5) - px, (tz + 0.5) - pz
-            if math.hypot(dx, dz) <= tol:
-                self.step("")             # arrive: stop walking
-                return True
-            ey = _wrap(math.atan2(dx, dz) - self.yaw())
-            ldx = _clamp(ey / self.gain_yaw, -0.20, 0.20)
-            ldy = 0.0
-            if level:
-                ldy = _clamp((math.pi / 2 - self.pitch()) / self.gain_pitch,
-                             -0.10, 0.10)
-            act = "FORWARD=1 LOOK=%.4f,%.4f" % (ldx, ldy)
-            if last is not None and math.dist((px, pz), last) < 0.03:
-                no_progress += 1
-            else:
-                no_progress = 0           # real progress: a long open walk never bails
-            last = (px, pz)
-            if no_progress >= 8:          # wedged -> stop fast (was a 300-tick spin)
-                self.step("")
-                return False
-            # Hop an obstacle, but keep two jumps >13 ticks apart GLOBALLY (across
-            # goto/dig calls, not just within this one) so they never land inside
-            # CavEX's ~10-tick double-tap window -- which would toggle creative
-            # flight and send the walker airborne (seen live during level_pad's
-            # many back-to-back gotos; the per-call cooldown couldn't see it).
-            if no_progress >= 2 and (self.tick_count - self._last_jump_tick) >= 13:
-                act += " JUMP=1"
-                self._last_jump_tick = self.tick_count
-            self.step(act)
+    def _within(self, tx, tz, tol):
         px, _, pz = self.pos()
         return math.hypot((tx + 0.5) - px, (tz + 0.5) - pz) <= tol
+
+    def _surface_window(self):
+        """The local heightmap as a world-column -> top-solid-y dict for nav.plan
+        (None where unsensed). nav never steps onto unknown cells."""
+        hm = self.heightmap()
+        if hm is None:
+            return None
+        fx, fz = self.feet_column()
+        surf = {}
+        for dz in range(-HALF, HALF + 1):
+            for dx in range(-HALF, HALF + 1):
+                surf[(fx + dx, fz + dz)] = hm[(dz + HALF) * WINDOW + (dx + HALF)] - 1
+        return surf
+
+    def _step_toward(self, tx, tz, jump=False, level=True):
+        """One tick of heading-controlled walking toward column-centre (tx,tz)."""
+        px, _, pz = self.pos()
+        ey = _wrap(math.atan2((tx + 0.5) - px, (tz + 0.5) - pz) - self.yaw())
+        ldx = _clamp(ey / self.gain_yaw, -0.20, 0.20)
+        ldy = _clamp((math.pi / 2 - self.pitch()) / self.gain_pitch,
+                     -0.10, 0.10) if level else 0.0
+        act = "FORWARD=1 LOOK=%.4f,%.4f" % (ldx, ldy)
+        if jump and (self.tick_count - self._last_jump_tick) >= 13:
+            act += " JUMP=1"            # global cooldown: never double-tap into flight
+            self._last_jump_tick = self.tick_count
+        self.step(act)
+
+    def _walk_waypoint(self, wx, wz, kind, max_ticks=16):
+        """Drive to an ADJACENT planned waypoint, confirming arrival by feet
+        column. 'step' jumps the +1; 'drop' waits out the fall. Returns True once
+        the feet land in (wx,wz)."""
+        for _ in range(max_ticks):
+            if self.state.get("flying"):
+                self._unfly()
+            if self.feet_column() == (wx, wz):
+                return True
+            self._step_toward(wx, wz, jump=(kind == "step"))
+            if kind == "drop":
+                self._await_ground(cap=6)   # ground-relative reads are junk mid-fall
+        return self.feet_column() == (wx, wz)
+
+    def goto(self, tx, tz, tol=0.7, max_ticks=200, allow_dig=False, level=True):
+        """Navigate to world column (tx,tz) by A* over the live heightmap window.
+
+        Receding horizon (Baritone-style): plan over what's visible, walk the
+        first few waypoints, re-sense, re-plan. Unlike the old greedy walker this
+        CLIMBS +1 terrace steps, DROPS up to 3, and ROUTES AROUND obstacles --
+        the navigation-over-distance blocker. Each planned edge is executed by an
+        existing confirmed primitive (walk/step/drop here; dig/bridge are Stage 2
+        and gated by ``allow_dig``). Falls back to a direct heading-walk only when
+        no heightmap is exported. Stuck-recovery escalates (replan -> nudge ->
+        bail) instead of the old single 8-tick give-up."""
+        start_tick = self.tick_count
+        stuck = 0
+        while self.tick_count - start_tick < max_ticks:
+            if self.state.get("flying"):
+                self._unfly()
+            if self._within(tx, tz, tol):
+                self.step("")
+                return True
+            surf = self._surface_window()
+            if surf is None:                       # no perception -> greedy fallback
+                self._step_toward(tx, tz, jump=(stuck >= 2), level=level)
+                stuck = stuck + 1 if stuck < 3 else 3
+                continue
+            fx, fz = self.feet_column()
+            path = nav.plan(surf, (fx, fz), (tx, tz), allow_dig=allow_dig,
+                            min_progress=nav.WALK)
+            if not path:
+                stuck += 1
+                if stuck >= 3:                     # genuinely wedged -> bail
+                    self.step("")
+                    return self._within(tx, tz, tol)
+                self._recover_nudge()
+                continue
+            stuck = 0
+            for (wx, wz, _wy, kind) in path[:4]:   # walk a few, then re-sense
+                if kind in ("dig", "bridge"):
+                    break                          # Stage 2; re-plan without it
+                if not self._walk_waypoint(wx, wz, kind):
+                    break                          # lost the waypoint -> re-plan
+                if self._within(tx, tz, tol):
+                    self.step("")
+                    return True
+                if self.tick_count - start_tick >= max_ticks:
+                    break
+        return self._within(tx, tz, tol)
+
+    def _recover_nudge(self):
+        """Dislodge a wedge: one cooldown-respecting jump + a brief strafe, so the
+        next re-plan starts from a slightly different cell."""
+        if (self.tick_count - self._last_jump_tick) >= 13:
+            self.step("JUMP=1")
+            self._last_jump_tick = self.tick_count
+        self.step("LEFT=1")
+        self.step("LEFT=1")
 
     def reachable(self, bx, by, bz, maxd=4.0):
         px, py, pz = self.pos()
