@@ -52,6 +52,22 @@ GOLD_ORE, IRON_ORE, COAL_ORE = 14, 15, 16
 LAPIS_ORE = 21
 DIAMOND_ORE = 56
 REDSTONE_ORE = 73
+# ---- decoration + structure palette (issue: richer worlds) ----
+# Every id below is registered + non-NULL in source/block/blocks.c (verified
+# against the blocks[] table). Non-solid plants sit ON the surface and are NOT
+# counted as terrain top (so the agent's ground reads stay clean); solid blocks
+# (pumpkin, cactus, structure blocks) DO raise the column top + skylight.
+PLANKS, COBBLE, GLASS, WOOL = 5, 4, 20, 35
+SANDSTONE, SMOOTH_SANDSTONE = 24, 100
+BRICKS, MOSSY, OBSIDIAN = 45, 48, 49
+TORCH, GLOWSTONE = 50, 89
+TALLGRASS, DEADBUSH = 31, 32           # tallgrass data: 1=grass, 2=fern (0=shrub)
+DANDELION, ROSE = 37, 38
+BROWN_MUSHROOM, RED_MUSHROOM = 39, 40
+CACTUS, REED, PUMPKIN, CLAY, ICE = 81, 83, 86, 82, 79
+# wool data = colour (Beta 1.7.3): 0 white,1 orange,4 yellow,5 lime,11 blue,14 red
+WOOL_COLOURS = (0, 1, 4, 5, 11, 14)
+SOLID_DECOR = frozenset((PUMPKIN, CACTUS))   # decoration that occupies its cell
 SEED = int(os.environ.get("CAVEX_SEED", "42"))   # CAVEX_SEED overrides; terrain + strata + RandomSeed all derive from it
 LEVEL_NAME = os.environ.get("CAVEX_LEVEL_NAME", "Claude World")  # CAVEX_LEVEL_NAME overrides the world-list name
 # Column height in blocks. MUST equal the target build's source/world.h
@@ -83,6 +99,25 @@ LAKE_MAX_DEPTH = 3           # deepest a basin bowl is dug below WATER_LEVEL
 LAKE_SPAWN_CLEAR = 6         # keep this Chebyshev radius around spawn lake-free, so a
                             # seed whose spawn column happens to be a basin still gets
                             # dry, solid footing (mirrors TREE_CLEAR for the spawn rule)
+
+# ---- biomes (richer worlds): broad horizontal regions that vary the surface
+# block, tree density and surface decoration, so exploring feels different from
+# place to place. A separate large-cell value-noise field picks the biome; the
+# spawn disc is forced to PLAINS so the agent always gets calm, buildable ground.
+PLAINS, FOREST, DESERT, SNOWY = 0, 1, 2, 3
+BIOME_CELL = 88              # biome patch size in blocks (big -> broad regions)
+BIOME_SPAWN_PLAINS = 18      # force PLAINS within this Chebyshev radius of spawn
+DECOR_SPAWN_CLEAR = 10       # no surface decoration within this radius of spawn (keeps
+                            #   the agent's build/eval sites near spawn clean)
+
+# ---- discoverable structures (richer worlds): rare landmarks placed on a coarse
+# deterministic grid, away from spawn, so a player exploring stumbles on them. ----
+STRUCT_CELL = 56            # one candidate structure per 56x56 grid cell
+STRUCT_MARGIN = 8           # candidate origin kept this far from cell edges (so a
+                            #   structure's footprint never crosses >1 cell boundary)
+STRUCT_MAX_R = 5            # max footprint radius of any structure (<= STRUCT_MARGIN)
+STRUCT_SPAWN_CLEAR = 40     # no structure within this radius of spawn
+STRUCT_PROB = 0.55          # fraction of grid cells that actually grow a structure
 
 def h(wx, wz, y, salt):
     """Deterministic pure-stdlib hash -> 32-bit unsigned, seeded from SEED.
@@ -254,25 +289,52 @@ def surface_y(wx, wz):
         top = 122
     return top
 
-def surface_block(top):
-    """Surface block for a column of the given height: snow on high ground, else grass."""
-    return SNOW if top >= SNOW_LINE else GRASS
+@lru_cache(maxsize=None)
+def biome(wx, wz):
+    """Broad horizontal biome region for a column. The spawn disc is forced to
+    PLAINS so the agent always lands on calm, buildable ground; elsewhere a
+    large-cell value-noise field carves desert / plains / forest / snowy regions
+    (every seed gets a different layout). High ground (>= SNOW_LINE) reads as snow
+    regardless, handled in surface_block()."""
+    if max(abs(wx - SPAWN_X), abs(wz - SPAWN_Z)) <= BIOME_SPAWN_PLAINS:
+        return PLAINS
+    v = _value_noise(wx, wz, BIOME_CELL)
+    if v < 0.24:
+        return DESERT
+    if v < 0.56:
+        return PLAINS
+    if v < 0.80:
+        return FOREST
+    return SNOWY
 
-TREE_PROB = 0.010          # ~1% of (non-snow) land columns sprout a tree
+def surface_block(wx, wz, top):
+    """Surface block: snow above the snow line, else by biome — desert sand,
+    snowy snow, plains/forest grass."""
+    if top >= SNOW_LINE:
+        return SNOW
+    b = biome(wx, wz)
+    if b == DESERT:
+        return SAND
+    if b == SNOWY:
+        return SNOW
+    return GRASS
+
+# Trees by biome: dense forests, scattered plains, none in desert/snowy/peaks.
+TREE_PROB = {PLAINS: 0.008, FOREST: 0.060, DESERT: 0.0, SNOWY: 0.0}
 TREE_CLEAR = 4             # keep this Chebyshev radius around spawn tree-free
 
 @lru_cache(maxsize=None)
 def is_tree(tx, tz):
     """True if a tree trunk originates at this column. Deterministic + seeded, so
-    every seed grows a DIFFERENT forest layout. No trees in the spawn clearing or
-    on the bare snowy peaks."""
+    every seed grows a DIFFERENT forest layout. Density follows the biome; no
+    trees in the spawn clearing, in lakes, or on the bare snowy peaks."""
     if max(abs(tx - SPAWN_X), abs(tz - SPAWN_Z)) <= TREE_CLEAR:
         return False
     if surface_y(tx, tz) >= SNOW_LINE:
         return False
     if lake_depth(tx, tz):          # no trees standing in lakes/ponds
         return False
-    return chance(tx, tz, 0, 20, TREE_PROB)
+    return chance(tx, tz, 0, 20, TREE_PROB[biome(tx, tz)])
 
 def column_blocks(wx, wz, top):
     """Scattered oak-like trees -> each seed's forest is unique. A column can carry
@@ -297,6 +359,144 @@ def column_blocks(wx, wz, top):
                 if cheb <= 1:
                     extra.append((T + 1, LEAVES))                      # upper ring
     return extra
+
+def _set_nibble(arr, idx, val):
+    """Set the 4-bit Data/light value for cell ``idx`` (same nibble order as the
+    skylight writer: even idx -> low nibble, odd idx -> high nibble)."""
+    if idx & 1:
+        arr[idx >> 1] = (arr[idx >> 1] & 0x0F) | ((val & 0xF) << 4)
+    else:
+        arr[idx >> 1] = (arr[idx >> 1] & 0xF0) | (val & 0xF)
+
+# ---------------- surface decoration (flowers, grass, cacti, ...) ----------------
+def surface_decoration(wx, wz, surf, b):
+    """One optional decoration on the surface (at surf+1) of a land column,
+    flavoured by biome and deterministic. Returns (block, data) or None. Solid
+    decoration (pumpkin/cactus, see SOLID_DECOR) raises the column top; plants do
+    not. Kept out of the spawn clearing and off bare peaks. Cactus height is
+    handled by the caller."""
+    if max(abs(wx - SPAWN_X), abs(wz - SPAWN_Z)) <= DECOR_SPAWN_CLEAR:
+        return None
+    if surf >= SNOW_LINE:
+        return None
+    if b == DESERT:
+        if chance(wx, wz, 0, 30, 0.020):
+            return (CACTUS, 0)
+        if chance(wx, wz, 0, 31, 0.012):
+            return (DEADBUSH, 0)
+        return None
+    if b == SNOWY:
+        if chance(wx, wz, 0, 32, 0.005):
+            return (DEADBUSH, 0)
+        return None
+    r = h(wx, wz, 0, 33) / 0x100000000          # deterministic [0,1)
+    if b == FOREST:
+        if r < 0.05:  return (BROWN_MUSHROOM, 0)
+        if r < 0.09:  return (RED_MUSHROOM, 0)
+        if r < 0.34:  return (TALLGRASS, 2)     # fern
+        if r < 0.38:  return (ROSE, 0)
+        return None
+    # PLAINS
+    if r < 0.006: return (PUMPKIN, 0)
+    if r < 0.05:  return (DANDELION, 0)
+    if r < 0.085: return (ROSE, 0)
+    if r < 0.36:  return (TALLGRASS, 1)         # grass
+    return None
+
+def near_water(wx, wz):
+    """True if a 4-neighbour column is a lake (for shoreline reed)."""
+    return (lake_depth(wx + 1, wz) or lake_depth(wx - 1, wz)
+            or lake_depth(wx, wz + 1) or lake_depth(wx, wz - 1))
+
+# ---------------- discoverable structures (towers / huts / pyramids) -------------
+TOWER, HUT, PYRAMID = 0, 1, 2
+
+@lru_cache(maxsize=None)
+def structure_at(gx, gz):
+    """Deterministic candidate structure for grid cell (gx, gz): returns
+    (ox, oz, kind, surf) or None. Origin held >= STRUCT_MARGIN from the cell edges
+    (so the footprint never crosses into a neighbour cell), kept clear of spawn,
+    off lakes and off the snow line."""
+    span = STRUCT_CELL - 2 * STRUCT_MARGIN
+    ox = gx * STRUCT_CELL + STRUCT_MARGIN + (h(gx, gz, 0, 50) % span)
+    oz = gz * STRUCT_CELL + STRUCT_MARGIN + (h(gx, gz, 1, 51) % span)
+    if max(abs(ox - SPAWN_X), abs(oz - SPAWN_Z)) <= STRUCT_SPAWN_CLEAR:
+        return None
+    if not chance(gx, gz, 0, 52, STRUCT_PROB):
+        return None
+    s = surface_y(ox, oz)
+    if s >= SNOW_LINE or lake_depth(ox, oz):
+        return None
+    b = biome(ox, oz)
+    if b == DESERT:
+        kind = PYRAMID
+    else:
+        kind = TOWER if h(gx, gz, 0, 53) & 1 else HUT
+    return (ox, oz, kind, s)
+
+def _tower_column(surf, dx, dz):
+    """5x5 cobblestone watchtower: 9-tall hollow walls, battlements, a doorway in
+    the south wall and a glowstone beacon at the top centre."""
+    out = []
+    perim = abs(dx) == 2 or abs(dz) == 2
+    if perim:
+        door = dx == 0 and dz == -2
+        for k in range(1, 10):
+            if door and k <= 2:
+                continue
+            out.append((surf + k, COBBLE, 0))
+        if (dx + dz) & 1 == 0:                  # crenellations on alternating cells
+            out.append((surf + 10, COBBLE, 0))
+    if dx == 0 and dz == 0:
+        out.append((surf + 10, GLOWSTONE, 0))   # beacon
+    return out
+
+def _hut_column(surf, dx, dz):
+    """Small ruined cabin: cobble footing + plank walls (some cells crumbled), a
+    doorway, a partial plank roof, and a glowstone 'lantern' inside."""
+    out = []
+    perim = abs(dx) == 2 or abs(dz) == 2
+    if perim:
+        door = dx == 0 and dz == -2
+        for k in range(1, 4):
+            if door and k <= 2:
+                continue
+            if chance(dx, dz, k, 60, 0.18):     # ruined: a few missing blocks
+                continue
+            out.append((surf + k, COBBLE if k == 1 else PLANKS, 0))
+    else:
+        if not chance(dx, dz, 0, 61, 0.30):     # roof with gaps
+            out.append((surf + 4, PLANKS, 0))
+    if dx == 0 and dz == 0:
+        out.append((surf + 1, GLOWSTONE, 0))
+    return out
+
+def _pyramid_column(surf, dx, dz):
+    """9x9 stepped sandstone pyramid, 5 tall at the centre, smooth-sandstone cap."""
+    cheb = max(abs(dx), abs(dz))
+    height = 5 - cheb
+    if height <= 0:
+        return []
+    out = [(surf + k, SANDSTONE, 0) for k in range(1, height + 1)]
+    if cheb == 0:
+        out[-1] = (surf + height, SMOOTH_SANDSTONE, 0)
+    return out
+
+_STRUCT_FN = {TOWER: _tower_column, HUT: _hut_column, PYRAMID: _pyramid_column}
+_STRUCT_FOUNDATION = {TOWER: COBBLE, HUT: COBBLE, PYRAMID: SANDSTONE}
+
+def structure_blocks(wx, wz):
+    """If a structure covers this column, return (foundation_block, origin_surf,
+    [(y, block, data), ...]); else None. Each column maps to exactly one grid cell
+    (STRUCT_MARGIN >= STRUCT_MAX_R guarantees footprints stay inside their cell)."""
+    st = structure_at(wx // STRUCT_CELL, wz // STRUCT_CELL)
+    if st is None:
+        return None
+    ox, oz, kind, surf = st
+    cells = _STRUCT_FN[kind](surf, wx - ox, wz - oz)
+    if not cells:
+        return None
+    return (_STRUCT_FOUNDATION[kind], surf, cells)
 
 # ---------------- spawn (computed from the heightmap, so the player stands on ground) ----------------
 # CavEX stores Player.Pos.y as the EYE position; the engine derives the feet as
@@ -324,31 +524,41 @@ def build_chunk(cx, cz):
             base = (x * 16 + z) * WORLD_HEIGHT   # x*H*16 + z*H
             surf = surface_y(wx, wz)        # per-column surface height (relief)
             depth = lake_depth(wx, wz)      # >0 only for flat basin (lake) columns
+            b = biome(wx, wz)
             # Layered sub-surface: bedrock floor, stone body, ores + fluid pockets
-            # (deterministic from SEED via strata_block()), up to the surface.
+            # (deterministic from SEED via strata_block()), then a biome-flavoured
+            # cover (desert = sand over sandstone, else dirt) up to the surface.
             for y in range(0, surf - 4):        blocks[base + y] = strata_block(wx, wz, y)
-            for y in range(surf - 4, surf):     blocks[base + y] = DIRT
-            blocks[base + surf] = surface_block(surf)   # snow on high ground, else grass
+            cover = SAND if b == DESERT else DIRT
+            for y in range(surf - 4, surf):     blocks[base + y] = cover
+            if b == DESERT:                     # sandstone transition below the sand
+                for y in range(max(0, surf - 6), surf - 4):
+                    blocks[base + y] = SANDSTONE
+            blocks[base + surf] = surface_block(wx, wz, surf)
 
             # Carve caves: thin 3D-noise iso-surface -> connected tunnels. Stops
             # short of the surface (solid roof) and the bedrock floor; in lake
             # columns it also stays a block below the basin bowl so water can't
-            # drain into the cave system.
+            # drain into the cave system. Rare glowstone studs the deep cave walls.
             cave_top = surf - CAVE_ROOF_MARGIN
             if depth:
                 cave_top = min(cave_top, WATER_LEVEL - depth - 1)
             for y in range(CAVE_FLOOR, cave_top + 1):
                 if is_cave(wx, wz, y, surf):
-                    blocks[base + y] = AIR
+                    blocks[base + y] = (GLOWSTONE if (y < 34 and chance(wx, wz, y, 70, 0.012))
+                                        else AIR)
 
             # Lakes/ponds: dig a shallow bowl into the basin floor and fill it
-            # with still water up to WATER_LEVEL; sandy bowl floor underneath.
+            # with still water up to WATER_LEVEL; sandy bowl floor underneath. In
+            # snowy biomes the exposed surface freezes to ice.
             water_top = -1
             if depth:
                 floor_y = WATER_LEVEL - depth
-                blocks[base + floor_y] = SAND
+                blocks[base + floor_y] = CLAY if chance(wx, wz, 0, 71, 0.25) else SAND
                 for y in range(floor_y + 1, WATER_LEVEL + 1):
                     blocks[base + y] = WATER
+                if b == SNOWY:
+                    blocks[base + WATER_LEVEL] = ICE
                 water_top = WATER_LEVEL
 
             top = surf
@@ -358,6 +568,50 @@ def build_chunk(cx, cz):
                         continue            # don't bury terrain under floating leaves
                     blocks[base + y] = bid
                     top = max(top, y)
+
+            # Discoverable structures (towers / huts / pyramids): level a foundation
+            # up to the origin's surface, then stamp the structure's column. Solid,
+            # so they raise `top` (skylight starts above them). Suppress decoration.
+            st = structure_blocks(wx, wz)
+            if st is not None:
+                foundation, osurf, cells = st
+                for y in range(surf + 1, osurf + 1):
+                    if 0 <= y < WORLD_HEIGHT:
+                        blocks[base + y] = foundation
+                        top = max(top, y)
+                for (y, bid, dat) in cells:
+                    if 0 <= y < WORLD_HEIGHT:
+                        blocks[base + y] = bid
+                        if dat:
+                            _set_nibble(data, base + y, dat)
+                        top = max(top, y)
+            elif water_top < 0 and surf < SNOW_LINE:
+                # Surface decoration on land: flowers, grass, ferns, mushrooms,
+                # cacti, dead bushes, pumpkins (biome-flavoured), and shoreline reed.
+                deco = surface_decoration(wx, wz, surf, b)
+                if deco is not None and blocks[base + surf + 1] == AIR:
+                    bid, dat = deco
+                    if bid == CACTUS:
+                        ch = 1 + (h(wx, wz, 0, 34) % 3)         # 1..3 tall
+                        for k in range(1, ch + 1):
+                            yy = surf + k
+                            if yy < WORLD_HEIGHT and blocks[base + yy] == AIR:
+                                blocks[base + yy] = CACTUS
+                                top = max(top, yy)
+                    else:
+                        yy = surf + 1
+                        blocks[base + yy] = bid
+                        if dat:
+                            _set_nibble(data, base + yy, dat)
+                        if bid in SOLID_DECOR:
+                            top = max(top, yy)
+                elif (b != SNOWY and surf == WATER_LEVEL and near_water(wx, wz)
+                      and blocks[base + surf + 1] == AIR and chance(wx, wz, 0, 35, 0.35)):
+                    reed = 1 + (h(wx, wz, 0, 36) % 2)           # 1..2 tall sugar cane
+                    for k in range(1, reed + 1):
+                        yy = surf + k
+                        if yy < WORLD_HEIGHT and blocks[base + yy] == AIR:
+                            blocks[base + yy] = REED
             hmap[z * 16 + x] = top + 1
             # Skylight: for land, the air above the surface block is lit. For a
             # lake the topmost water block is open to the sky, so light it too;
@@ -536,6 +790,12 @@ def main():
     cave_air = 0         # AIR cells trapped below the surface roof (caves)
     water_cells = 0      # WATER cells anywhere (lakes/ponds)
     lake_cols = set()    # (wx, wz) columns whose top is still water (lake surface)
+    sand_surf = 0        # columns whose top block is sand (desert biome surface)
+    decor_count = 0      # surface-decoration plant cells (flowers/grass/cacti/...)
+    struct_glow = 0      # above-ground glowstone (tower beacons / hut lanterns)
+    pyramid_caps = 0     # smooth-sandstone cells (only ever a pyramid apex)
+    DECOR_IDS = frozenset((DANDELION, ROSE, TALLGRASS, DEADBUSH, BROWN_MUSHROOM,
+                           RED_MUSHROOM, CACTUS, REED, PUMPKIN))
     for cz in range(32):
         for cx in range(32):
             ch = read_chunk(cx, cz)
@@ -556,12 +816,20 @@ def main():
                             if top_y >= 0 and CAVE_FLOOR <= y <= BASE_Y:
                                 cave_air += 1   # air under the roof -> a cave cell
                             continue
+                        if b in DECOR_IDS:
+                            decor_count += 1
+                        elif b == GLOWSTONE and y > BASE_Y:
+                            struct_glow += 1
+                        elif b == SMOOTH_SANDSTONE:
+                            pyramid_caps += 1
                         if top_y < 0:
                             top_y = y
                             if y > region_max:
                                 region_max = y
                             if b == WATER:
                                 lake_cols.add((cx * 16 + x_in, cz * 16 + z_in))
+                            elif b == SAND:
+                                sand_surf += 1
                             elif b in (GRASS, SNOW):
                                 heights.add(y)
                                 if b == SNOW:
@@ -594,6 +862,15 @@ def main():
     biggest_lake = _largest_connected(lake_cols)
     assert biggest_lake >= 8, \
         f"no multi-block water body (largest connected lake surface {biggest_lake} cells)"
+
+    # (8) richer-world detail: a desert biome (sand surfaces), surface decoration
+    # (flowers / grass / cacti / mushrooms / reed / pumpkins), and at least one
+    # discoverable structure (tower/hut glowstone, or a pyramid's smooth-sandstone
+    # apex). These gate the new features the way the cave/lake checks gate theirs.
+    assert sand_surf >= 50, f"no desert (sand-surface) biome found ({sand_surf} cols)"
+    assert decor_count >= 200, f"too little surface decoration ({decor_count} cells)"
+    assert (struct_glow + pyramid_caps) >= 1, \
+        f"no discoverable structures (glow {struct_glow}, pyramid apexes {pyramid_caps})"
 
     # (4) spawn is safe: solid surface, 2 air blocks of head clearance, and the
     # player's FEET (Pos.y - EYE_HEIGHT) land just above the surface block top.
@@ -629,6 +906,8 @@ def main():
           f"strata ores {sorted(ores_found)} + lava/water, "
           f"caves {cave_air} air cells (largest vol {largest_cave}), "
           f"lakes {water_cells} water cells (largest pool {biggest_lake}), "
+          f"desert {sand_surf} sand cols, decor {decor_count} plants, "
+          f"structures (glow {struct_glow} + pyramid apexes {pyramid_caps}), "
           f"'Claude World' preserved")
 
 if __name__ == "__main__":
