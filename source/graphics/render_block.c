@@ -401,7 +401,10 @@ size_t render_block_torch(struct displaylist* d, struct block_info* this,
 		int s2x, s2y; // layer shift
 		int s3 = 48;  // y offset
 
-		switch(this->block->metadata) {
+		// Mask to the low 3 orientation bits so this renderer is shared by the
+		// lever/button, which keep a power state in bit 0x08. Real torches only
+		// ever use metadata 1..5, so the mask is a no-op for them.
+		switch(this->block->metadata & 0x07) {
 			case 1:
 				s1x = -128;
 				s1y = 0;
@@ -1444,6 +1447,20 @@ size_t render_block_layer(struct displaylist* d, struct block_info* this,
 		render_block_side(
 			d, W2C_COORD(this->x), W2C_COORD(this->y), W2C_COORD(this->z), 0,
 			(this->block->metadata + 1) * 32,
+			blocks[this->block->type]->getTextureIndex(this, side),
+			blocks[this->block->type]->luminance, true, 0, false, 0, side,
+			vertex_light);
+	return 1;
+}
+
+// Like render_block_layer but a FIXED 1/16-block-tall slab (height 16 of 256),
+// because carpet uses its metadata for the wool colour, not a layer height.
+size_t render_block_carpet(struct displaylist* d, struct block_info* this,
+						   enum side side, struct block_info* it,
+						   uint8_t* vertex_light, bool count_only) {
+	if(!count_only)
+		render_block_side(
+			d, W2C_COORD(this->x), W2C_COORD(this->y), W2C_COORD(this->z), 0, 16,
 			blocks[this->block->type]->getTextureIndex(this, side),
 			blocks[this->block->type]->luminance, true, 0, false, 0, side,
 			vertex_light);

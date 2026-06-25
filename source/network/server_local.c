@@ -88,6 +88,26 @@ struct entity* server_local_spawn_boat(vec3 pos, float yaw,
 	return e;
 }
 
+struct entity* server_local_spawn_minecart(vec3 pos, float yaw,
+										   struct server_local* s) {
+	assert(s);
+
+	uint32_t entity_id = entity_gen_id(s->entities);
+	struct entity* e = dict_entity_safe_get(s->entities, entity_id);
+	entity_minecart(entity_id, e, true, &s->world);
+	e->data.boat.yaw = yaw;
+	e->teleport(e, pos);
+
+	clin_rpc_send(&(struct client_rpc) {
+		.type = CRPC_SPAWN_MINECART,
+		.payload.spawn_boat.entity_id = e->id,
+		.payload.spawn_boat.pos = {e->pos[0], e->pos[1], e->pos[2]},
+		.payload.spawn_boat.yaw = yaw,
+	});
+
+	return e;
+}
+
 void server_local_spawn_block_drops(struct server_local* s,
 									struct block_info* blk_info) {
 	assert(s && blk_info);
@@ -389,13 +409,43 @@ static void server_local_process(struct server_rpc* call, void* user) {
 			}
 			break;
 		}
+		case SRPC_CREATIVE_SET_PICKED: {
+			// Survival-style creative grid (issue: creative move/select): put a
+			// full, non-depleting stack of the requested item onto the cursor
+			// (picked item), or clear the cursor when id == 0. The grid is a
+			// virtual, infinite source, so this never touches a real slot -- the
+			// normal SRPC_WINDOW_CLICK path then moves the cursor stack into the
+			// player's hotbar/inventory exactly like survival. Any item id is
+			// valid (blocks AND items), so the grid can offer the whole set.
+			// Gated on creative: a survival client could never send this, but the
+			// authority must not trust that.
+			if(s->player.has_pos && s->player.creative) {
+				uint16_t id = call->payload.creative_set_picked.item_id;
+				struct item_data picked
+					= {.id = 0, .durability = 0, .count = 0};
+				if(id > 0 && id < ITEMS_MAX && items[id]
+				   && items[id]->renderItem) {
+					picked.id = id;
+					picked.count = items[id]->max_stack;
+				}
+				inventory_set_picked_item(&s->player.inventory, picked);
+
+				clin_rpc_send(&(struct client_rpc) {
+					.type = CRPC_INVENTORY_SLOT,
+					.payload.inventory_slot.window = WINDOWC_INVENTORY,
+					.payload.inventory_slot.slot = SPECIAL_SLOT_PICKED_ITEM,
+					.payload.inventory_slot.item = picked,
+				});
+			}
+			break;
+		}
 		case SRPC_BOAT_CONTROL: {
 			// Apply the rider's steer/throttle to the boat entity. The boat's
 			// own tick_server integrates it; here we just latch the inputs so the
 			// server stays authoritative over the motion.
 			struct entity* e = dict_entity_get(
 				s->entities, call->payload.boat_control.entity_id);
-			if(e && e->type == ENTITY_BOAT) {
+			if(e && (e->type == ENTITY_BOAT || e->type == ENTITY_MINECART)) {
 				if(call->payload.boat_control.dismount) {
 					e->data.boat.passenger_id = 0;
 					e->data.boat.control_forward = 0;

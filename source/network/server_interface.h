@@ -35,6 +35,7 @@ enum server_rpc_type {
 	SRPC_WINDOW_CLOSE,
 	SRPC_SET_GAMEMODE,
 	SRPC_CREATIVE_PICK_BLOCK,
+	SRPC_CREATIVE_SET_PICKED,
 	SRPC_BOAT_CONTROL,
 };
 
@@ -81,6 +82,16 @@ struct server_rpc {
 			// server's creative flag is set.
 			uint16_t block_id;
 		} creative_pick_block;
+		struct {
+			// Item id the survival-style creative grid wants a full,
+			// non-depleting stack of on the cursor (the picked item). 0 clears
+			// the cursor. Honoured only while the server's creative flag is set.
+			// Any item id is valid (blocks AND items: doors/bed/minecart/...),
+			// so the creative grid can offer the whole item set, not just
+			// blocks. The existing window-click path then moves it between the
+			// player's real slots exactly like the survival inventory.
+			uint16_t item_id;
+		} creative_set_picked;
 		struct {
 			// Server-authoritative boat control, sent each tick by the riding
 			// client. forward/turn are -1/0/+1; dismount clears the rider.

@@ -30,6 +30,7 @@ enum entity_type {
 	ENTITY_LOCAL_PLAYER,
 	ENTITY_ITEM,
 	ENTITY_BOAT,
+	ENTITY_MINECART,
 };
 
 struct server_local;
@@ -65,9 +66,11 @@ struct entity {
 			bool creative;
 			int jump_tap_window;
 			bool jump_held_prev;
-			// Entity id of the boat currently being ridden (0 = on foot). Set
-			// client-side when the player boards a boat; while non-zero the
-			// player tick steers the boat and rides along instead of walking.
+			// Entity id of the vehicle currently being ridden (0 = on foot).
+			// Set client-side when the player boards a boat OR minecart; while
+			// non-zero the player tick steers that vehicle and rides along
+			// instead of walking. (Named for the boat, which came first; it now
+			// holds either vehicle's id.)
 			uint32_t riding_boat_id;
 		} local_player;
 		struct entity_item {
@@ -134,6 +137,19 @@ void entity_boat(uint32_t id, struct entity* e, bool server, void* world);
 // along the new heading into the x/z velocity, then apply horizontal drag.
 // forward/turn are each -1/0/+1. No engine state, so it is unit-testable.
 void entity_boat_steer(float* yaw, vec3 vel, int forward, int turn);
+
+// Rideable minecart (boat-style; issue chosen scope). Same constructor shape as
+// the boat and reuses the boat steering + data.boat state, but rolls on land
+// under gravity (no buoyancy) instead of floating. Tagged ENTITY_MINECART.
+void entity_minecart(uint32_t id, struct entity* e, bool server, void* world);
+
+// Minecart box dimensions (blocks) and physics tuning, shared by the server
+// tick and the render so the collision box and drawn box agree.
+#define MINECART_WIDTH 0.98F
+#define MINECART_HEIGHT 0.7F
+#define MINECART_LENGTH 0.98F
+#define MINECART_GRAVITY 0.04F // downward pull per tick while airborne
+#define MINECART_DRAG 0.95F	   // idle horizontal damping (carts coast further)
 
 // Pure motor math: while `powered`, add MOTOR_THRUST along the heading into the
 // x/z velocity, then clamp the horizontal speed to MOTOR_MAX_SPEED so a cruising

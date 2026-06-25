@@ -1250,21 +1250,6 @@ static struct item item_cake = {
 	},
 };
 
-static struct item item_bed = {
-	.name = "Bed",
-	.has_damage = false,
-	.max_stack = 1,
-	.renderItem = render_item_flat,
-	.armor.is_armor = false,
-	.tool.type = TOOL_TYPE_ANY,
-	.render_data = {
-		.item = {
-			.texture_x = 13,
-			.texture_y = 2,
-		},
-	},
-};
-
 static struct item item_shears = {
 	.name = "Shears",
 	.has_damage = false,
@@ -1405,4 +1390,6 @@ extern struct item item_door_wood;
 extern struct item item_door_iron;
 extern struct item item_firework;
 extern struct item item_boat;
+extern struct item item_bed;
+extern struct item item_minecart;
 extern struct item item_motor;
