@@ -117,7 +117,6 @@ add_executable(cavex
 				source/game/gui/screen_map.c
 				source/game/gui/map_projection.c
 				source/game/gui/screen_inventory.c
-				source/game/gui/screen_creative_inventory.c
 				source/game/gui/creative_inventory_list.c
 				source/game/gui/screen_crafting.c
 				source/game/gui/screen_furnace.c
