@@ -17,10 +17,55 @@
 	along with CavEX.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "../network/server_local.h"
 #include "blocks.h"
 
 static enum block_material getMaterial(struct block_info* this) {
 	return MATERIAL_ORGANIC;
+}
+
+// CavEX has no block-tick scheduler, so igniting TNT with flint & steel
+// detonates it instantly: clear a small sphere of blocks (radius 2) to air,
+// including the TNT itself. Bedrock and air are left untouched. No fuse, no
+// primed-TNT entity, no chain reactions, no entity damage, drops or particles.
+// The radius is deliberately tiny to keep the block writes and the resulting
+// remesh inside the Wii MEM1 budget.
+static void onRightClick(struct server_local* s, struct item_data* it,
+						 struct block_info* where, struct block_info* on,
+						 enum side on_side) {
+	// only flint & steel ignites TNT; anything else does nothing
+	if(!it || it->id != ITEM_FLINT_STEEL)
+		return;
+
+	for(w_coord_t dx = -2; dx <= 2; dx++) {
+		for(w_coord_t dy = -2; dy <= 2; dy++) {
+			for(w_coord_t dz = -2; dz <= 2; dz++) {
+				// sphere mask: radius 2 -> at most ~33 cells
+				if(dx * dx + dy * dy + dz * dz > 4)
+					continue;
+
+				w_coord_t bx = on->x + dx;
+				w_coord_t by = on->y + dy;
+				w_coord_t bz = on->z + dz;
+
+				struct block_data blk;
+				if(!server_world_get_block(&s->world, bx, by, bz, &blk))
+					continue;
+
+				// leave air and bedrock alone
+				if(blk.type == BLOCK_AIR || blk.type == BLOCK_BEDROCK)
+					continue;
+
+				server_world_set_block(&s->world, bx, by, bz,
+									   (struct block_data) {
+										   .type = BLOCK_AIR,
+										   .metadata = 0,
+										   .sky_light = 0,
+										   .torch_light = 0,
+									   });
+			}
+		}
+	}
 }
 
 static size_t getBoundingBox(struct block_info* this, bool entity,
@@ -51,7 +96,7 @@ struct block block_tnt = {
 	.getTextureIndex = getTextureIndex,
 	.getDroppedItem = block_drop_default,
 	.onRandomTick = NULL,
-	.onRightClick = NULL,
+	.onRightClick = onRightClick,
 	.transparent = false,
 	.renderBlock = render_block_full,
 	.renderBlockAlways = NULL,
