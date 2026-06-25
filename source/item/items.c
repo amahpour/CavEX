@@ -145,6 +145,7 @@ void items_init() {
 	// map
 	items[359] = &item_shears;
 	items[360] = &item_firework;
+	items[361] = &item_motor; // boat motor (issue #33)
 
 	// golden record
 	// green record

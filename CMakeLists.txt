@@ -131,6 +131,7 @@ add_executable(cavex
 				source/item/items/item_door.c
 				source/item/items/item_firework.c
 				source/item/items/item_boat.c
+				source/item/items/item_motor.c
 
 				source/network/client_interface.c
 				source/network/level_archive.c

@@ -50,6 +50,28 @@ void entity_boat_steer(float* yaw, vec3 vel, int forward, int turn) {
 	vel[2] *= BOAT_DRAG;
 }
 
+// Pure motor math — see declaration in entity.h. Adds a steady forward impulse
+// along the heading while powered, then caps the horizontal speed so a cruising
+// boat can never move far enough in one tick to skip past unloaded chunks.
+void entity_boat_throttle(float yaw, vec3 vel, bool powered) {
+	assert(vel);
+
+	if(!powered)
+		return;
+
+	vel[0] += MOTOR_THRUST * sinf(yaw);
+	vel[2] += MOTOR_THRUST * cosf(yaw);
+
+	// Clamp horizontal speed to the cap (scale x/z together so the heading is
+	// preserved). guard the divide: speed > cap implies speed > 0.
+	float speed = sqrtf(vel[0] * vel[0] + vel[2] * vel[2]);
+	if(speed > MOTOR_MAX_SPEED) {
+		float scale = MOTOR_MAX_SPEED / speed;
+		vel[0] *= scale;
+		vel[2] *= scale;
+	}
+}
+
 static bool entity_boat_client_tick(struct entity* e) {
 	entity_default_client_tick(e);
 
@@ -78,8 +100,15 @@ static bool entity_boat_server_tick(struct entity* e, struct server_local* s) {
 	e->data.boat.yaw = yaw;
 	e->orient[0] = yaw;
 
+	// motor (issue #33): self-propel forward along the heading while engaged,
+	// capped so it cannot chunk-skip. Applied after steering so the rider can
+	// still turn and add/subtract thrust on top of the cruise.
+	entity_boat_throttle(yaw, e->vel, e->data.boat.powered);
+
 	// consume the control so the boat coasts to a stop if the rider dismounts or
-	// stops sending input
+	// stops sending input. The motor latch is owned by the server's
+	// SRPC_BOAT_CONTROL handler (set from the held item, cleared on dismount),
+	// so it is NOT cleared here.
 	e->data.boat.control_forward = 0;
 	e->data.boat.control_turn = 0;
 
@@ -176,6 +205,7 @@ void entity_boat(uint32_t id, struct entity* e, bool server, void* world) {
 	e->data.boat.in_water = false;
 	e->data.boat.control_forward = 0;
 	e->data.boat.control_turn = 0;
+	e->data.boat.powered = false;
 
 	entity_default_init(e, server, world);
 }
