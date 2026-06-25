@@ -80,6 +80,9 @@ struct entity {
 			bool in_water;		   // set by the server tick (buoyancy state)
 			int control_forward;   // last steer intent -1/0/+1 (server only)
 			int control_turn;	   // last turn  intent -1/0/+1 (server only)
+			bool powered; // motor engaged this tick: cruise forward on its own
+						  // (issue #33). Server-only; set from the rider's held
+						  // motor item, cleared on dismount. Runtime state only.
 		} boat;
 	} data;
 };
@@ -119,10 +122,24 @@ void entity_boat(uint32_t id, struct entity* e, bool server, void* world);
 #define BOAT_BUOYANCY 0.04F	  // upward push per tick while submerged
 #define BOAT_GRAVITY 0.04F	  // downward pull per tick while airborne
 
+// Motor (issue #33): when the motor is engaged the boat self-propels forward.
+// MOTOR_THRUST is added along the heading each tick (independent of rider input,
+// so it cruises hands-off); MOTOR_MAX_SPEED caps the resulting horizontal speed
+// so a powered boat can never outrun chunk loading and skip terrain. The cap is
+// chosen below the per-tick distance that would cross a chunk edge in one step.
+#define MOTOR_THRUST 0.06F	  // forward accel per tick while powered
+#define MOTOR_MAX_SPEED 0.35F // hard cap on horizontal speed (blocks/tick)
+
 // Pure steering math: advance the heading by the turn input, add forward thrust
 // along the new heading into the x/z velocity, then apply horizontal drag.
 // forward/turn are each -1/0/+1. No engine state, so it is unit-testable.
 void entity_boat_steer(float* yaw, vec3 vel, int forward, int turn);
+
+// Pure motor math: while `powered`, add MOTOR_THRUST along the heading into the
+// x/z velocity, then clamp the horizontal speed to MOTOR_MAX_SPEED so a cruising
+// boat can never chunk-skip. When not powered it is a no-op (the boat coasts on
+// the steering drag from entity_boat_steer). No engine state, so unit-testable.
+void entity_boat_throttle(float yaw, vec3 vel, bool powered);
 
 uint32_t entity_gen_id(dict_entity_t dict);
 
