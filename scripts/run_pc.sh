@@ -15,7 +15,7 @@ echo
 echo "==> Stage run directory ($RUN_DIR)"
 mkdir -p "$RUN_DIR"
 ln -sfn "$ROOT_DIR/assets" "$RUN_DIR/assets"                 # textures + vertex/fragment shaders
-[ -f "$RUN_DIR/config.json" ] || cp "$ROOT_DIR/config_pc.json" "$RUN_DIR/config.json"
+cp "$ROOT_DIR/config_pc.json" "$RUN_DIR/config.json"        # always refresh so keybind changes (e.g. creative_page) are picked up
 [ -d "$RUN_DIR/saves/world" ] || python3 "$ROOT_DIR/gen_world.py" "$RUN_DIR/saves"
 
 echo
