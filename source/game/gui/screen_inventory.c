@@ -62,8 +62,11 @@ static size_t slots_index;
 
 static size_t selected_slot;
 
-// Creative grab-strip state (unused in survival).
+// Creative grab-strip state (unused in survival). cinv_sel is the focused strip
+// cell (0..CINV_PAGE-1) when keyboard focus is ON the strip, or -1 when focus is
+// on the inventory slots (the survival behaviour).
 static int cinv_page;
+static int cinv_sel;
 
 static bool creative_active(void) {
 	return gstate.local_player
@@ -137,6 +140,10 @@ static void screen_inventory_reset(struct screen* s, int width, int height) {
 		gstate.local_player->data.local_player.capture_input = false;
 
 	cinv_page = 0;
+	// In creative, open with keyboard focus already ON the grab strip so WASD /
+	// the d-pad walk the items right away (press DOWN to drop into your own
+	// slots). Survival keeps focus on the slots.
+	cinv_sel = creative_active() ? 0 : -1;
 
 	s->render3D = screen_ingame.render3D;
 
@@ -203,8 +210,11 @@ static void screen_inventory_update(struct screen* s, float dt) {
 	// non-depleting stack on the cursor. The click edge is only consumed when
 	// the pointer is over a cell, so survival slot clicks below are unaffected.
 	if(creative_active()) {
-		if(input_pressed(IB_CREATIVE_PAGE))
+		if(input_pressed(IB_CREATIVE_PAGE) || input_pressed(IB_SCROLL_RIGHT))
 			cinv_page = (cinv_page + 1) % cinv_page_count();
+		if(input_pressed(IB_SCROLL_LEFT))
+			cinv_page
+				= (cinv_page + cinv_page_count() - 1) % cinv_page_count();
 
 		float gpx, gpy, gpa;
 		if(input_pointer(&gpx, &gpy, &gpa)) {
@@ -219,7 +229,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		}
 	}
 
-	if(input_pressed(IB_GUI_CLICK)) {
+	if(cinv_sel < 0 && input_pressed(IB_GUI_CLICK)) {
 		uint16_t action_id;
 		if(windowc_new_action(gstate.windows[WINDOWC_INVENTORY], &action_id,
 							  false, slots[selected_slot].slot)) {
@@ -231,7 +241,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 				.payload.window_click.slot = slots[selected_slot].slot,
 			});
 		}
-	} else if(input_pressed(IB_GUI_CLICK_ALT)) {
+	} else if(cinv_sel < 0 && input_pressed(IB_GUI_CLICK_ALT)) {
 		uint16_t action_id;
 		if(windowc_new_action(gstate.windows[WINDOWC_INVENTORY], &action_id,
 							  true, slots[selected_slot].slot)) {
@@ -292,6 +302,50 @@ static void screen_inventory_update(struct screen* s, float dt) {
 	if(pointer_available && pointer_slot >= 0) {
 		selected_slot = pointer_slot;
 		pointer_has_item = true;
+		cinv_sel = -1; // mouse over a slot -> inventory focus
+	} else if(creative_active() && cinv_sel >= 0) {
+		// Keyboard/controller focus is on the grab strip: arrows/WASD walk the
+		// item grid, page at the left/right edges, DOWN off the bottom row
+		// returns to the inventory slots, and the click/confirm button grabs the
+		// focused item onto the cursor.
+		int col = cinv_sel % CINV_COLS;
+		int row = cinv_sel / CINV_COLS;
+		int pc = cinv_page_count();
+
+		if(input_pressed(IB_GUI_LEFT)) {
+			if(col > 0) {
+				col--;
+			} else {
+				cinv_page = (cinv_page + pc - 1) % pc;
+				col = CINV_COLS - 1;
+			}
+		}
+		if(input_pressed(IB_GUI_RIGHT)) {
+			if(col < CINV_COLS - 1) {
+				col++;
+			} else {
+				cinv_page = (cinv_page + 1) % pc;
+				col = 0;
+			}
+		}
+		if(input_pressed(IB_GUI_UP) && row > 0)
+			row--;
+		if(input_pressed(IB_GUI_DOWN)) {
+			if(row < CINV_ROWS - 1)
+				row++;
+			else
+				cinv_sel = -1; // drop back down to the inventory slots
+		}
+
+		if(cinv_sel >= 0) {
+			cinv_sel = row * CINV_COLS + col;
+			if(input_pressed(IB_GUI_CLICK) || input_pressed(IB_GUI_CLICK_ALT)) {
+				size_t idx
+					= (size_t)cinv_page * CINV_PAGE + (size_t)cinv_sel;
+				if(idx < creative_inventory_count())
+					cinv_send_set_picked(creative_inventory_item_id(idx));
+			}
+		}
 	} else {
 		if(input_pressed(IB_GUI_LEFT)) {
 			selected_slot = slot_nearest[0];
@@ -304,8 +358,13 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		}
 
 		if(input_pressed(IB_GUI_UP)) {
-			selected_slot = slot_nearest[2];
-			pointer_has_item = false;
+			// Off the top of the inventory in creative -> step into the strip.
+			if(creative_active() && slot_nearest[2] == selected_slot) {
+				cinv_sel = (CINV_ROWS - 1) * CINV_COLS;
+			} else {
+				selected_slot = slot_nearest[2];
+				pointer_has_item = false;
+			}
 		}
 
 		if(input_pressed(IB_GUI_DOWN)) {
@@ -352,6 +411,15 @@ static void cinv_render2d(int width, int height) {
 			gutil_draw_item(&(struct item_data) {.id = id, .count = 1},
 							gx + c * CINV_PITCH, gy + r * CINV_PITCH, 1);
 		}
+	}
+
+	// keyboard/controller-focused cell highlight
+	if(cinv_sel >= 0) {
+		int hr = cinv_sel / CINV_COLS;
+		int hc = cinv_sel % CINV_COLS;
+		gfx_bind_texture(&texture_gui2);
+		gutil_texquad(gx + hc * CINV_PITCH - 8, gy + hr * CINV_PITCH - 8, 208, 0,
+					  24, 24, 24 * 2, 24 * 2);
 	}
 
 	// hovered item name
@@ -441,10 +509,13 @@ static void screen_inventory_render2D(struct screen* s, int width, int height) {
 			gutil_draw_item(&item, off_x + slots[k].x, off_y + slots[k].y, 1);
 	}
 
-	gfx_bind_texture(&texture_gui2);
-
-	gutil_texquad(off_x + selection->x - 8, off_y + selection->y - 8, 208, 0,
-				  24, 24, 24 * 2, 24 * 2);
+	// The inventory selection box is hidden while keyboard focus is on the grab
+	// strip (the strip draws its own highlight).
+	if(cinv_sel < 0) {
+		gfx_bind_texture(&texture_gui2);
+		gutil_texquad(off_x + selection->x - 8, off_y + selection->y - 8, 208, 0,
+					  24, 24, 24 * 2, 24 * 2);
+	}
 
 	int icon_offset = 32;
 	icon_offset += gutil_control_icon(icon_offset, IB_GUI_UP, "Move");
@@ -462,10 +533,19 @@ static void screen_inventory_render2D(struct screen* s, int width, int height) {
 
 	icon_offset += gutil_control_icon(icon_offset, IB_INVENTORY, "Leave");
 
+	if(creative_active())
+		icon_offset
+			+= gutil_control_icon(icon_offset, IB_CREATIVE_PAGE, "Page items");
+
 	struct item_data item;
 	if(inventory_get_picked_item(inv, &item)) {
 		if(pointer_available && pointer_has_item) {
 			gutil_draw_item(&item, pointer_x - 8 * 2, pointer_y - 8 * 2, 0);
+		} else if(cinv_sel >= 0) {
+			int gx2, gy2;
+			cinv_origin(width, height, &gx2, &gy2);
+			gutil_draw_item(&item, gx2 + (cinv_sel % CINV_COLS) * CINV_PITCH,
+							gy2 + (cinv_sel / CINV_COLS) * CINV_PITCH, 0);
 		} else {
 			gutil_draw_item(&item, off_x + selection->x, off_y + selection->y,
 							0);
