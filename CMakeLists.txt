@@ -34,6 +34,7 @@ add_executable(cavex
 				source/block/block_cactus.c
 				source/block/block_cake.c
 				source/block/block_candle.c
+				source/block/block_carpet.c
 				source/block/block_cast_block.c
 				source/block/block_chest.c
 				source/block/block_clay.c
@@ -59,6 +60,8 @@ add_executable(cavex
 				source/block/block_bubble_column.c
 				source/block/block_lava.c
 				source/block/block_leaves.c
+				source/block/block_lever.c
+				source/block/block_button.c
 				source/block/block_log.c
 				source/block/block_netherrack.c
 				source/block/block_noteblock.c
@@ -100,6 +103,7 @@ add_executable(cavex
 				source/entity/entity_local_player.c
 				source/entity/entity_item.c
 				source/entity/entity_boat.c
+				source/entity/entity_minecart.c
 
 				source/cNBT/buffer.c
 				source/cNBT/nbt_loading.c
@@ -131,6 +135,8 @@ add_executable(cavex
 				source/item/items/item_door.c
 				source/item/items/item_firework.c
 				source/item/items/item_boat.c
+				source/item/items/item_bed.c
+				source/item/items/item_minecart.c
 
 				source/network/client_interface.c
 				source/network/level_archive.c

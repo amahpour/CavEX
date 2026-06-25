@@ -302,6 +302,14 @@ void clin_process(struct client_rpc* call) {
 			e->data.boat.yaw = call->payload.spawn_boat.yaw;
 			e->teleport(e, call->payload.spawn_boat.pos);
 		} break;
+		case CRPC_SPAWN_MINECART: {
+			struct entity* e = dict_entity_safe_get(
+				gstate.entities, call->payload.spawn_boat.entity_id);
+			entity_minecart(call->payload.spawn_boat.entity_id, e, false,
+							&gstate.world);
+			e->data.boat.yaw = call->payload.spawn_boat.yaw;
+			e->teleport(e, call->payload.spawn_boat.pos);
+		} break;
 		case CRPC_PICKUP_ITEM: {
 			if(gstate.local_player
 			   && call->payload.pickup_item.collector_id

@@ -112,7 +112,7 @@ void items_init() {
 	// bucket
 	// water bucket
 	// lava bucket
-	// minecart
+	items[328] = &item_minecart;
 	items[329] = &item_saddle;
 	items[330] = &item_door_iron;
 	items[331] = &item_redstone;

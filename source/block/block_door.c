@@ -106,6 +106,38 @@ static void onRightClick(struct server_local* s, struct item_data* it,
 	server_world_set_block(&s->world, on->x, other_y, on->z, other);
 }
 
+// Set the open/closed state on BOTH halves of the door at (x,y,z). No-op if the
+// block there is not a door. The 0x04 bit is the open flag and 0x08 marks the
+// upper half. Used by the lever/button "redstone" to drive (iron) doors, which
+// have no onRightClick of their own.
+void block_door_set_open(struct server_local* s, w_coord_t x, w_coord_t y,
+						 w_coord_t z, bool open) {
+	struct block_data blk;
+	if(!server_world_get_block(&s->world, x, y, z, &blk))
+		return;
+	if(blk.type != BLOCK_WOODEN_DOOR && blk.type != BLOCK_IRON_DOOR)
+		return;
+
+	w_coord_t other_y = (blk.metadata & 0x08) ? y - 1 : y + 1;
+	struct block_data other;
+	bool have_other = server_world_get_block(&s->world, x, other_y, z, &other)
+		&& other.type == blk.type;
+
+	if(open)
+		blk.metadata |= 0x04;
+	else
+		blk.metadata &= ~0x04;
+	server_world_set_block(&s->world, x, y, z, blk);
+
+	if(have_other) {
+		if(open)
+			other.metadata |= 0x04;
+		else
+			other.metadata &= ~0x04;
+		server_world_set_block(&s->world, x, other_y, z, other);
+	}
+}
+
 struct block block_wooden_door = {
 	.name = "Wooden Door",
 	.getSideMask = getSideMask,

@@ -158,6 +158,9 @@ extern struct block block_candle;
 extern struct block block_smooth_stone;
 extern struct block block_smooth_sandstone;
 extern struct block block_oak_wood;
+extern struct block block_carpet;
+extern struct block block_lever;
+extern struct block block_stone_button;
 
 extern struct block* blocks[256];
 
@@ -174,5 +177,14 @@ bool block_place_default(struct server_local* s, struct item_data* it,
 						 enum side on_side);
 size_t block_drop_default(struct block_info* this, struct item_data* it,
 						  struct random_gen* g);
+
+// Set the open state on both halves of a door at (x,y,z); no-op if not a door.
+void block_door_set_open(struct server_local* s, w_coord_t x, w_coord_t y,
+						 w_coord_t z, bool open);
+// Minimal "redstone": drive the 6 face-neighbours of a switch at (x,y,z) to
+// `powered` -- (iron) doors open/close, powered/detector rails toggle their
+// powered bit. Direct local activation only (no wire/dust propagation).
+void block_redstone_activate(struct server_local* s, w_coord_t x, w_coord_t y,
+							 w_coord_t z, bool powered);
 
 #endif

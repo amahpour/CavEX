@@ -99,7 +99,7 @@ static uint32_t boat_in_reach(vec3 feet) {
 
 	while(!dict_entity_end_p(it)) {
 		struct entity* e = &dict_entity_ref(it)->value;
-		if(e->type == ENTITY_BOAT
+		if((e->type == ENTITY_BOAT || e->type == ENTITY_MINECART)
 		   && glm_vec3_distance2(feet, e->pos) < glm_pow2(BOAT_MOUNT_REACH))
 			return e->id;
 		dict_entity_next(it);
@@ -121,7 +121,8 @@ static bool entity_tick(struct entity* e) {
 			= dict_entity_get(gstate.entities,
 							  e->data.local_player.riding_boat_id);
 
-		if(boat && boat->type == ENTITY_BOAT) {
+		if(boat
+		   && (boat->type == ENTITY_BOAT || boat->type == ENTITY_MINECART)) {
 			int forward = 0, turn = 0;
 			bool dismount = false;
 

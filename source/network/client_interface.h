@@ -43,6 +43,9 @@ enum client_rpc_type {
 	CRPC_PARTICLE_BURST,
 	CRPC_GAMEMODE,
 	CRPC_SPAWN_BOAT,
+	// Reuses the spawn_boat payload (entity_id, pos, yaw); the minecart just
+	// constructs a different entity type client-side.
+	CRPC_SPAWN_MINECART,
 };
 
 struct client_rpc {

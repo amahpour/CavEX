@@ -99,7 +99,7 @@ void blocks_init() {
 	blocks[66] = &block_rail;
 	blocks[67] = &block_stone_stairs;
 	// sign wall mounted
-	// lever
+	blocks[69] = &block_lever;
 	blocks[70] = &block_stone_pressure_plate;
 	blocks[71] = &block_iron_door;
 	blocks[72] = &block_wooden_pressure_plate;
@@ -107,7 +107,7 @@ void blocks_init() {
 	blocks[74] = &block_redstoneore_lit;
 	blocks[75] = &block_redstone_torch;
 	blocks[76] = &block_redstone_torch_lit;
-	// button
+	blocks[77] = &block_stone_button;
 	blocks[78] = &block_snow;
 	blocks[79] = &block_ice;
 	blocks[80] = &block_snow_block;
@@ -132,6 +132,8 @@ void blocks_init() {
 	blocks[99] = &block_smooth_stone;
 	blocks[100] = &block_smooth_sandstone;
 	blocks[101] = &block_oak_wood;
+	// Carpet: not a Beta 1.7.3 block; CavEX-only id (mirrors modern MC's 171).
+	blocks[171] = &block_carpet;
 
 	for(int k = 0; k < 256; k++) {
 		if(blocks[k]) {
