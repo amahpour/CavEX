@@ -119,6 +119,10 @@ enum item_type {
 	ITEM_BED = 355,
 	ITEM_SHEARS = 359,
 	ITEM_FIREWORK = 360,
+	// Boat motor (issue #33): a craftable item that, while selected in the
+	// hotbar and riding a boat, engages powered forward cruise. Not a vanilla
+	// Beta id (those stop at 2256); 361 is the next free CavEX slot.
+	ITEM_MOTOR = 361,
 };
 
 #include "../block/blocks_data.h"

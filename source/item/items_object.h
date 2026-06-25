@@ -1392,3 +1392,4 @@ extern struct item item_firework;
 extern struct item item_boat;
 extern struct item item_bed;
 extern struct item item_minecart;
+extern struct item item_motor;

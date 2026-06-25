@@ -450,12 +450,21 @@ static void server_local_process(struct server_rpc* call, void* user) {
 					e->data.boat.passenger_id = 0;
 					e->data.boat.control_forward = 0;
 					e->data.boat.control_turn = 0;
+					e->data.boat.powered = false;
 				} else {
 					e->data.boat.passenger_id = 1; // marker: ridden
 					e->data.boat.control_forward
 						= call->payload.boat_control.forward;
 					e->data.boat.control_turn
 						= call->payload.boat_control.turn;
+					// Motor (issue #33): the boat is powered while the rider has
+					// the motor item selected in the hotbar. Server-authoritative
+					// and reachable (craft motor -> select -> ride). A boat ridden
+					// without the motor selected stays exactly the #34 boat.
+					struct item_data held;
+					e->data.boat.powered
+						= inventory_get_hotbar_item(&s->player.inventory, &held)
+						&& held.id == ITEM_MOTOR;
 				}
 			}
 			break;

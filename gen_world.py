@@ -664,6 +664,7 @@ def write_level_dat(path, disk_size):
         p_compound([t_short("id", 97), t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 4)]),  # Candle (#55) — glowing block
         p_compound([t_short("id", 98), t_byte("Count", 64), t_short("Damage", 0), t_byte("Slot", 5)]),  # Bubble column (#56) — ride upward
         p_compound([t_short("id", 333), t_byte("Count", 1), t_short("Damage", 0), t_byte("Slot", 6)]),  # Boat (#34/#82) — place + ride
+        p_compound([t_short("id", 361), t_byte("Count", 1), t_short("Damage", 0), t_byte("Slot", 7)]),  # Boat motor (#33) — select while riding to cruise
     ]
     player = t_compound("Player", [
         t_short("Health", 20),
