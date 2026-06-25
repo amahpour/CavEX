@@ -40,14 +40,17 @@
 // paged "all items" grab strip above it: click a cell to put a full,
 // non-depleting stack of that item on the cursor, then drop it into any slot.
 // Everything below is gated on creative_active(); the survival path is
-// untouched. The strip + GUI are centred together as one unit so they fit the
-// Wii's 480px screen (3*36 + 10 + 167*2 = 452).
+// untouched. The strip + GUI are centred together as one unit. The strip's row
+// count (cinv_rows) FILLS the window height above the GUI, so a bigger/maximised
+// window shows more items and fewer pages; it is clamped so the Wii's 480px
+// screen keeps the minimum and very tall windows stay sane.
 #define CINV_COLS 9
-#define CINV_ROWS 3
-#define CINV_PAGE (CINV_COLS * CINV_ROWS)
 #define CINV_PITCH (18 * 2) // px between cell origins
 #define CINV_ICON (16 * 2)	// drawn icon size
 #define CINV_GAP 10			// px between the strip and the GUI
+#define CINV_TOP 28			// px reserved above the strip for the title
+#define CINV_MIN_ROWS 3		// keep >=3 even on the Wii's 480px screen
+#define CINV_MAX_ROWS 8		// cap the grid on very tall windows
 
 struct inv_slot {
 	int x, y;
@@ -63,7 +66,7 @@ static size_t slots_index;
 static size_t selected_slot;
 
 // Creative grab-strip state (unused in survival). cinv_sel is the focused strip
-// cell (0..CINV_PAGE-1) when keyboard focus is ON the strip, or -1 when focus is
+// cell (0..cinv_page_size()-1) when keyboard focus is ON the strip, or -1 when focus is
 // on the inventory slots (the survival behaviour).
 static int cinv_page;
 static int cinv_sel;
@@ -73,9 +76,25 @@ static bool creative_active(void) {
 		&& gstate.local_player->data.local_player.creative;
 }
 
+// Number of strip rows that fit above the GUI in the current window, clamped.
+static int cinv_rows(void) {
+	int avail = gfx_height() - CINV_TOP - CINV_GAP - GUI_HEIGHT * 2;
+	int r = avail / CINV_PITCH;
+	if(r < CINV_MIN_ROWS)
+		r = CINV_MIN_ROWS;
+	if(r > CINV_MAX_ROWS)
+		r = CINV_MAX_ROWS;
+	return r;
+}
+
+static int cinv_page_size(void) {
+	return cinv_rows() * CINV_COLS;
+}
+
 static int cinv_page_count(void) {
 	size_t total = creative_inventory_count();
-	return total ? (int)((total + CINV_PAGE - 1) / CINV_PAGE) : 1;
+	int ps = cinv_page_size();
+	return total ? (int)(((int)total + ps - 1) / ps) : 1;
 }
 
 // Top-left origin of the survival GUI. In creative the whole {strip + GUI} unit
@@ -84,7 +103,7 @@ static int cinv_page_count(void) {
 static void inv_origin(int width, int height, int* off_x, int* off_y) {
 	*off_x = (width - GUI_WIDTH * 2) / 2;
 	if(creative_active()) {
-		int strip = CINV_ROWS * CINV_PITCH;
+		int strip = cinv_rows() * CINV_PITCH;
 		int total = strip + CINV_GAP + GUI_HEIGHT * 2;
 		int top = (height - total) / 2;
 		if(top < 4)
@@ -97,7 +116,7 @@ static void inv_origin(int width, int height, int* off_x, int* off_y) {
 
 // Top-left origin of the grab strip (above the GUI). Creative only.
 static void cinv_origin(int width, int height, int* gx, int* gy) {
-	int strip = CINV_ROWS * CINV_PITCH;
+	int strip = cinv_rows() * CINV_PITCH;
 	int total = strip + CINV_GAP + GUI_HEIGHT * 2;
 	int top = (height - total) / 2;
 	if(top < 4)
@@ -111,9 +130,9 @@ static int cinv_cell_at(int width, int height, float px, float py) {
 	int gx, gy;
 	cinv_origin(width, height, &gx, &gy);
 	size_t total = creative_inventory_count();
-	for(int r = 0; r < CINV_ROWS; r++) {
+	for(int r = 0; r < cinv_rows(); r++) {
 		for(int c = 0; c < CINV_COLS; c++) {
-			size_t idx = (size_t)cinv_page * CINV_PAGE + (size_t)r * CINV_COLS
+			size_t idx = (size_t)cinv_page * cinv_page_size() + (size_t)r * CINV_COLS
 				+ c;
 			if(idx >= total)
 				continue;
@@ -210,6 +229,13 @@ static void screen_inventory_update(struct screen* s, float dt) {
 	// non-depleting stack on the cursor. The click edge is only consumed when
 	// the pointer is over a cell, so survival slot clicks below are unaffected.
 	if(creative_active()) {
+		// A window resize can change the row count (and thus the page count);
+		// keep the page and strip selection in range.
+		if(cinv_page >= cinv_page_count())
+			cinv_page = 0;
+		if(cinv_sel >= cinv_page_size())
+			cinv_sel = cinv_page_size() - 1;
+
 		if(input_pressed(IB_CREATIVE_PAGE) || input_pressed(IB_SCROLL_RIGHT))
 			cinv_page = (cinv_page + 1) % cinv_page_count();
 		if(input_pressed(IB_SCROLL_LEFT))
@@ -331,7 +357,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		if(input_pressed(IB_GUI_UP) && row > 0)
 			row--;
 		if(input_pressed(IB_GUI_DOWN)) {
-			if(row < CINV_ROWS - 1)
+			if(row < cinv_rows() - 1)
 				row++;
 			else
 				cinv_sel = -1; // drop back down to the inventory slots
@@ -341,7 +367,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 			cinv_sel = row * CINV_COLS + col;
 			if(input_pressed(IB_GUI_CLICK) || input_pressed(IB_GUI_CLICK_ALT)) {
 				size_t idx
-					= (size_t)cinv_page * CINV_PAGE + (size_t)cinv_sel;
+					= (size_t)cinv_page * cinv_page_size() + (size_t)cinv_sel;
 				if(idx < creative_inventory_count())
 					cinv_send_set_picked(creative_inventory_item_id(idx));
 			}
@@ -360,7 +386,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		if(input_pressed(IB_GUI_UP)) {
 			// Off the top of the inventory in creative -> step into the strip.
 			if(creative_active() && slot_nearest[2] == selected_slot) {
-				cinv_sel = (CINV_ROWS - 1) * CINV_COLS;
+				cinv_sel = (cinv_rows() - 1) * CINV_COLS;
 			} else {
 				selected_slot = slot_nearest[2];
 				pointer_has_item = false;
@@ -392,17 +418,17 @@ static void cinv_render2d(int width, int height) {
 	gutil_text(gx, gy - 18, title, 16, false);
 
 	gfx_texture(false);
-	for(int r = 0; r < CINV_ROWS; r++)
+	for(int r = 0; r < cinv_rows(); r++)
 		for(int c = 0; c < CINV_COLS; c++)
 			gutil_texquad_col(gx + c * CINV_PITCH - 2, gy + r * CINV_PITCH - 2, 0,
 							  0, 0, 0, CINV_ICON + 4, CINV_ICON + 4, 60, 60, 60,
 							  255);
 	gfx_texture(true);
 
-	for(int r = 0; r < CINV_ROWS; r++) {
+	for(int r = 0; r < cinv_rows(); r++) {
 		for(int c = 0; c < CINV_COLS; c++) {
 			size_t idx
-				= (size_t)cinv_page * CINV_PAGE + (size_t)r * CINV_COLS + c;
+				= (size_t)cinv_page * cinv_page_size() + (size_t)r * CINV_COLS + c;
 			if(idx >= total)
 				continue;
 			uint16_t id = creative_inventory_item_id(idx);
