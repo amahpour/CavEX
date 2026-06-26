@@ -1235,20 +1235,8 @@ static struct item item_sugar = {
 	},
 };
 
-static struct item item_cake = {
-	.name = "Cake",
-	.has_damage = false,
-	.max_stack = 1,
-	.renderItem = render_item_flat,
-	.armor.is_armor = false,
-	.tool.type = TOOL_TYPE_ANY,
-	.render_data = {
-		.item = {
-			.texture_x = 13,
-			.texture_y = 1,
-		},
-	},
-};
+// item_cake now lives in source/item/items/item_cake.c (it gained an onItemPlace
+// that places the cake block); see the extern declaration further below.
 
 static struct item item_shears = {
 	.name = "Shears",
@@ -1393,3 +1381,4 @@ extern struct item item_boat;
 extern struct item item_bed;
 extern struct item item_minecart;
 extern struct item item_motor;
+extern struct item item_cake;
