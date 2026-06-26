@@ -26,8 +26,14 @@
 #   --mp4       write an MP4 instead of a GIF
 #   --fps N     output frame rate                    (default: 20)
 #   --scale W   scale to width W, preserving aspect  (default: 480)
-#   --start N   skip the first N frames (loading)    (default: 0)
+#   --start N   skip the first N frames by INDEX     (default: 0)
 #   --step N    keep every Nth frame (thinning)      (default: 1)
+#
+#   --start/--step are a 0-based INDEX into the sorted frame list (identical in
+#   the ffmpeg and Pillow/convert paths), NOT a frame/tick number. autoshot
+#   files are tick-numbered (autoshot_000540.png), so to skip a load phase pass
+#   a COUNT of leading frames, not a tick: --start 8 drops the first 8 frames.
+#   --start beyond the number of frames is an error (no empty output is written).
 #   --dedup     drop consecutive near-identical frames (default: ON)
 #   --no-dedup  keep every frame (legacy behaviour; may show static pauses)
 #
@@ -59,7 +65,7 @@ while [[ $# -gt 0 ]]; do
 		--step) STEP="$2"; shift 2 ;;
 		--dedup) DEDUP=1; shift ;;
 		--no-dedup) DEDUP=0; shift ;;
-		-h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,45p' "$0"; exit 0 ;;
 		*) POSITIONAL+=("$1"); shift ;;
 	esac
 done
@@ -85,7 +91,26 @@ if [[ ${#FRAMES[@]} -eq 0 ]]; then
 	echo "  CAVEX_DEMO=demos/walk-forward.txt CAVEX_AUTOPLAY=1 CAVEX_AUTOSHOT=2 vblank_mode=0 ../cavex" >&2
 	exit 1
 fi
-echo "Stitching ${#FRAMES[@]} frames from $FRAMES_DIR -> $OUTPUT (${FPS}fps, ${SCALE}px wide, start ${START}, step ${STEP}, dedup ${DEDUP})"
+
+# --start/--step select a 0-based INDEX range (start, start+step, ...) of the
+# sorted frame list -- the SAME selection every stitcher branch applies. Compute
+# how many frames survive that selection up front so we can FAIL LOUDLY here,
+# once, instead of silently writing an empty GIF (e.g. --start 540 against a run
+# that only dumped ~50 frames -- the autoshot files are tick-numbered, so a tick
+# was mistaken for a count). This guards ffmpeg and the convert/Pillow fallbacks
+# alike. mpdecimate dedup runs later and only ever removes more, so an empty set
+# here means an empty output regardless of path.
+NSEL=0
+if [[ "$START" -lt "${#FRAMES[@]}" ]]; then
+	NSEL=$(( (${#FRAMES[@]} - START + STEP - 1) / STEP ))
+fi
+if [[ "$NSEL" -le 0 ]]; then
+	echo "error: no frames selected: --start $START exceeds the ${#FRAMES[@]} frames in $FRAMES_DIR" >&2
+	echo "  --start/--step are a 0-based INDEX into the sorted frame list, not a tick number." >&2
+	echo "  autoshot files are tick-numbered (autoshot_000540.png); pass a COUNT of leading frames to skip." >&2
+	exit 1
+fi
+echo "Stitching ${#FRAMES[@]} frames ($NSEL selected) from $FRAMES_DIR -> $OUTPUT (${FPS}fps, ${SCALE}px wide, start ${START}, step ${STEP}, dedup ${DEDUP})"
 
 # ffmpeg filter prefix, applied (in order) before scale in every ffmpeg pass:
 #   1. select  -- drop the first START frames, then keep every STEPth
