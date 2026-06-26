@@ -10,6 +10,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/block/block_smooth_stone.c
 	${CMAKE_SOURCE_DIR}/source/block/block_smooth_sandstone.c
 	${CMAKE_SOURCE_DIR}/source/block/block_oak_wood.c
+	${CMAKE_SOURCE_DIR}/source/block/block_tnt.c
 	${CMAKE_SOURCE_DIR}/source/block/face_occlusion.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/buffer.c
 	${CMAKE_SOURCE_DIR}/source/cNBT/nbt_parsing.c
@@ -42,6 +43,7 @@ add_library(cavex_testlib STATIC
 	stubs/items_stub.c
 	stubs/render_stub.c
 	stubs/entity_player_stub.c
+	stubs/server_world_stub.c
 )
 
 target_include_directories(cavex_testlib PRIVATE
@@ -71,6 +73,7 @@ add_executable(cavex_tests
 	test_util.c
 	test_aabb.c
 	test_blocks.c
+	test_block_tnt.c
 	test_face_occlusion.c
 	test_buffer.c
 	test_daytime.c
