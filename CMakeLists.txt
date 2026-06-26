@@ -137,6 +137,7 @@ add_executable(cavex
 				source/item/items/item_bed.c
 				source/item/items/item_minecart.c
 				source/item/items/item_motor.c
+				source/item/items/item_cake.c
 
 				source/network/client_interface.c
 				source/network/level_archive.c
