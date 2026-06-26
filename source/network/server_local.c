@@ -567,6 +567,53 @@ static bool server_local_tick_entity(uint32_t key, struct entity* e,
 	return remove;
 }
 
+// Rail-demo (issue #111; CAVEX_RAIL_DEMO=1 only): once chunks around spawn have
+// loaded, drop a minecart onto the gen_world rail loop and give it an initial
+// shove so it circulates for the proof GIF. One-shot, demo-only, server side.
+// gen_world builds the loop's top edge at z = spawn_z + 4, west edge at
+// x = spawn_x - 2; we scan a straight cell of that top edge for the rail block
+// and spawn the cart there moving +x (clockwise, into the powered straight).
+static void server_local_rail_demo_spawn(struct server_local* s) {
+	static int enabled = -1; // -1 unread, 0 off, 1 on (read getenv once)
+	static int armed = 0;
+	static bool done = false;
+	if(done)
+		return;
+	if(enabled < 0)
+		enabled = getenv("CAVEX_RAIL_DEMO") ? 1 : 0;
+	if(!enabled) {
+		done = true; // never again: not a rail-demo run
+		return;
+	}
+	if(++armed < 40) // ~2 s: let the spawn chunks (and the loop) load first
+		return;
+	done = true;
+
+	w_coord_t sx = (w_coord_t)floorf(s->player.x);
+	w_coord_t sz = (w_coord_t)floorf(s->player.z);
+	w_coord_t cart_x = sx - 1;	   // a straight (non-corner) cell of the top edge
+	w_coord_t cart_z = sz + 4;	   // top edge of the loop
+
+	// Find the rail's y by scanning the column around the player's height.
+	w_coord_t py = (w_coord_t)floorf(s->player.y);
+	for(w_coord_t y = py + 2; y >= py - 4; y--) {
+		struct block_data blk;
+		if(!server_world_get_block(&s->world, cart_x, y, cart_z, &blk))
+			continue;
+		if(blk.type != BLOCK_RAIL && blk.type != BLOCK_POWERED_RAIL
+		   && blk.type != BLOCK_DETECTOR_RAIL)
+			continue;
+
+		struct entity* e = server_local_spawn_minecart(
+			(vec3) {cart_x + 0.5F, (float)y + MINECART_HEIGHT / 2.0F + 0.05F,
+					cart_z + 0.5F},
+			glm_rad(90.0F), s);
+		if(e)
+			e->vel[0] = 0.2F; // initial shove east -> clockwise around the loop
+		break;
+	}
+}
+
 static void server_local_update(struct server_local* s) {
 	assert(s);
 
@@ -576,6 +623,8 @@ static void server_local_update(struct server_local* s) {
 		return;
 
 	s->world_time++;
+
+	server_local_rail_demo_spawn(s);
 
 	entity_tick_all(s->entities, server_local_tick_entity, s);
 

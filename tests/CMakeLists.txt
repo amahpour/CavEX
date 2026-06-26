@@ -32,6 +32,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/entity/entity_id.c
 	${CMAKE_SOURCE_DIR}/source/entity/entity_local_player.c
 	${CMAKE_SOURCE_DIR}/source/entity/entity_boat.c
+	${CMAKE_SOURCE_DIR}/source/entity/entity_minecart.c
 	${CMAKE_SOURCE_DIR}/source/platform/demo_input.c
 	${CMAKE_SOURCE_DIR}/source/game/state_export.c
 	${CMAKE_SOURCE_DIR}/source/game/gui/map_projection.c
@@ -84,6 +85,7 @@ add_executable(cavex_tests
 	test_entity_tick.c
 	test_double_tap.c
 	test_boat.c
+	test_minecart.c
 	test_demo.c
 	test_state_export.c
 	test_map.c

@@ -65,6 +65,10 @@ TALLGRASS, DEADBUSH = 31, 32           # tallgrass data: 1=grass, 2=fern (0=shru
 DANDELION, ROSE = 37, 38
 BROWN_MUSHROOM, RED_MUSHROOM = 39, 40
 CACTUS, REED, PUMPKIN, CLAY, ICE = 81, 83, 86, 82, 79
+# Rails (issue #111): plain rail 66 (shapes 0-9: straights, slopes, curves),
+# powered rail 27 (shapes 0-5 + 0x8 = powered). Used only by the optional
+# rail-demo loop below (CAVEX_RAIL_DEMO), never in the normal world.
+RAIL, POWERED_RAIL = 66, 27
 # wool data = colour (Beta 1.7.3): 0 white,1 orange,4 yellow,5 lime,11 blue,14 red
 WOOL_COLOURS = (0, 1, 4, 5, 11, 14)
 SOLID_DECOR = frozenset((PUMPKIN, CACTUS))   # decoration that occupies its cell
@@ -511,6 +515,57 @@ SPAWN_FEET = SPAWN_SURFACE + 1                        # top face of the surface 
 SPAWN_Y = SPAWN_FEET                                  # integer respawn cell for SpawnX/Y/Z
 SPAWN = (SPAWN_X + 0.5, SPAWN_FEET + 0.38 + EYE_HEIGHT, SPAWN_Z + 0.5)  # eye pos; feet ~0.38 above ground
 
+# ---- optional rail-demo loop (issue #111; CAVEX_RAIL_DEMO=1 only) ------------
+# A fixed, flat, closed rail loop a few blocks in front of spawn so a minecart
+# placed on it rides forever (powered rails on each straight push it around) and
+# a from-spawn camera sees it traverse the straights AND take the curves. Gated
+# behind CAVEX_RAIL_DEMO so it never pollutes the normal Claude World; the
+# ai_playtest rig (which forwards os.environ to gen_world) sets it for the GIF.
+# A companion one-shot in server_local.c spawns the cart on this loop on load.
+RAIL_DEMO = os.environ.get("CAVEX_RAIL_DEMO") == "1"
+# Loop footprint (inclusive block coords on the flat clearing). South of spawn
+# (+z) and centred on the spawn x so the loop sits squarely ahead when the
+# player is forced to face +z (the RAIL_DEMO rotation in write_level_dat).
+# Surface is flattened to the spawn surface height so the whole track is level
+# (slopes are exercised by the unit tests; the loop stays flat for a clean,
+# predictable ride + camera).
+RAIL_Y = SPAWN_SURFACE                       # rails sit ON this solid block (top face = RAIL_Y+1)
+RAIL_X0, RAIL_X1 = SPAWN_X - 2, SPAWN_X + 3   # west..east edges (6 wide)
+RAIL_Z0, RAIL_Z1 = SPAWN_Z + 4, SPAWN_Z + 9   # north..south edges (6 deep), clear of spawn
+RAIL_CLEAR_PAD = 1                            # extra flattened margin around the loop
+
+def rail_demo_meta(wx, wz):
+    """Rail metadata for cell (wx,wz) on the loop perimeter, or None if the cell
+    is not on the loop. Straights: 0=N-S (left/right edges), 1=E-W (top/bottom).
+    Corners use the plain-rail curve shapes (NW=6,NE=7,SE=8,SW=9 — verified
+    against entity_minecart.c RAIL_ENDS so the cart actually rounds the bend).
+    One straight per edge is a powered rail turned on (|0x8), oriented to push
+    the cart clockwise (N edge ->E, E edge ->S, S edge ->W, W edge ->N)."""
+    on_left   = wx == RAIL_X0 and RAIL_Z0 <= wz <= RAIL_Z1
+    on_right  = wx == RAIL_X1 and RAIL_Z0 <= wz <= RAIL_Z1
+    on_top    = wz == RAIL_Z0 and RAIL_X0 <= wx <= RAIL_X1
+    on_bottom = wz == RAIL_Z1 and RAIL_X0 <= wx <= RAIL_X1
+    if not (on_left or on_right or on_top or on_bottom):
+        return None
+    # Corners first (a cell on two edges is a corner).
+    if wx == RAIL_X0 and wz == RAIL_Z0: return (RAIL, 6)          # NW curve
+    if wx == RAIL_X1 and wz == RAIL_Z0: return (RAIL, 7)          # NE curve
+    if wx == RAIL_X1 and wz == RAIL_Z1: return (RAIL, 8)          # SE curve
+    if wx == RAIL_X0 and wz == RAIL_Z1: return (RAIL, 9)          # SW curve
+    # Straights: pick one mid-edge cell per edge to be a powered+on rail.
+    mid_x = (RAIL_X0 + RAIL_X1) // 2
+    mid_z = (RAIL_Z0 + RAIL_Z1) // 2
+    if on_top:    return (POWERED_RAIL, 1 | 0x8) if wx == mid_x else (RAIL, 1)
+    if on_bottom: return (POWERED_RAIL, 1 | 0x8) if wx == mid_x else (RAIL, 1)
+    if on_left:   return (POWERED_RAIL, 0 | 0x8) if wz == mid_z else (RAIL, 0)
+    if on_right:  return (POWERED_RAIL, 0 | 0x8) if wz == mid_z else (RAIL, 0)
+    return None
+
+def rail_demo_in_clearing(wx, wz):
+    """True if (wx,wz) is inside the flattened rail-demo clearing (loop + pad)."""
+    return (RAIL_X0 - RAIL_CLEAR_PAD <= wx <= RAIL_X1 + RAIL_CLEAR_PAD
+            and RAIL_Z0 - RAIL_CLEAR_PAD <= wz <= RAIL_Z1 + RAIL_CLEAR_PAD)
+
 def build_chunk(cx, cz):
     blocks = bytearray(COL_BLOCKS)
     data   = bytearray(COL_NIBBLES)    # all 0
@@ -568,6 +623,35 @@ def build_chunk(cx, cz):
                         continue            # don't bury terrain under floating leaves
                     blocks[base + y] = bid
                     top = max(top, y)
+
+            # Rail-demo loop (issue #111; CAVEX_RAIL_DEMO only): flatten the
+            # clearing to a level stone platform at RAIL_Y, clear the air above,
+            # and stamp the loop's rail (+metadata) at RAIL_Y+1. Takes priority
+            # over structures/decoration for these columns so the track is clean.
+            if RAIL_DEMO and rail_demo_in_clearing(wx, wz):
+                # Solid platform: fill up to RAIL_Y with stone (covering any dip),
+                # carve everything above to air (remove trees/terrain humps).
+                for y in range(surf + 1, RAIL_Y + 1):
+                    if 0 <= y < WORLD_HEIGHT:
+                        blocks[base + y] = STONE
+                for y in range(RAIL_Y + 1, WORLD_HEIGHT):
+                    if blocks[base + y] != AIR:
+                        blocks[base + y] = AIR
+                blocks[base + RAIL_Y] = STONE
+                top = RAIL_Y
+                rail = rail_demo_meta(wx, wz)
+                if rail is not None:
+                    bid, dat = rail
+                    blocks[base + RAIL_Y + 1] = bid
+                    _set_nibble(data, base + RAIL_Y + 1, dat)
+                    top = RAIL_Y + 1
+                hmap[z * 16 + x] = top + 1
+                sky_from = top + 1
+                for y in range(sky_from, WORLD_HEIGHT):
+                    idx = base + y
+                    if idx & 1: skyl[idx >> 1] |= 0xF0
+                    else:       skyl[idx >> 1] |= 0x0F
+                continue
 
             # Discoverable structures (towers / huts / pyramids): level a foundation
             # up to the origin's surface, then stamp the structure's column. Solid,
@@ -671,7 +755,11 @@ def write_level_dat(path, disk_size):
         t_int("Dimension", 0),
         t_byte("gameMode", GAME_MODE),  # 0 survival / 1 creative (issue #21); CavEX reads .Data.Player.gameMode
         t_list("Pos", 6, [p_double(v) for v in SPAWN]),
-        t_list("Rotation", 5, [p_float(float(h(SPAWN_X, SPAWN_Z, 0, 99) % 360)), p_float(15.0)]),
+        # Rotation: normally a seed-derived random yaw; for the rail demo force the
+        # player to face the loop (south/+z, pitch tilted down) so the from-spawn
+        # autoshot frames frame the moving cart on the track.
+        t_list("Rotation", 5, ([p_float(0.0), p_float(28.0)] if RAIL_DEMO
+                               else [p_float(float(h(SPAWN_X, SPAWN_Z, 0, 99) % 360)), p_float(15.0)])),
         t_list("Motion", 6, [p_double(0.0)] * 3),
         t_list("Inventory", 10, inv),
     ])
