@@ -1,11 +1,16 @@
 // Unit tests for the pure creative-inventory item enumeration.
 // creative_inventory_count()/_item_id() walk the global items[] registry and
-// report the entries the creative grid offers: every non-NULL items[id] in id
-// order 1..ITEMS_MAX-1 that has an item renderer AND is not a hidden
-// "placed-form" (the raw bed/door blocks, offered as dedicated items instead).
-// This spans BOTH block items (ids 1..255) and dedicated items (ids >= 256), so
-// the survival-style grid offers the whole set. No GUI / GL state, so it is
-// tested directly against a hand-built registry.
+// report the entries the creative grid offers: every non-NULL items[id] that
+// has an item renderer AND is not a hidden "placed-form" (the raw bed/door
+// blocks, offered as dedicated items instead). This spans BOTH block items (ids
+// 1..255) and dedicated items (ids >= 256), so the survival-style grid offers
+// the whole set. No GUI / GL state, so it is tested directly against a
+// hand-built registry.
+//
+// Ordering: a curated FEATURED set (carpet/lever/button/doors/bed/minecart/boat)
+// is surfaced FIRST in build-priority order; the remaining includable ids follow
+// in ascending id order with the featured ids skipped, so each id appears once
+// and the total count is unchanged.
 //
 // The repo enforces a per-test coverage gate (each registered test must add >=1
 // line not covered by any other test), so these group the distinct code paths.
@@ -86,11 +91,70 @@ TEST(creative_item_id_order_bounds_and_excludes) {
 	}
 }
 
+// Install a registry exercising the featured reorder: several curated featured
+// ids (carpet 171, lever 69, button 77, bed 355 -- a subset of FEATURED, given
+// out of registration order), plus two plain ids (5, 17) that must fall to the
+// ascending tail behind the featured block.
+static void setup_featured_registry(void) {
+	for(int k = 0; k < ITEMS_MAX; k++)
+		items[k] = NULL;
+
+	items[5] = &item_renderable;	// plain tail
+	items[17] = &item_renderable;	// plain tail
+	items[69] = &item_renderable;	// featured (lever)
+	items[77] = &item_renderable;	// featured (button)
+	items[171] = &item_renderable;	// featured (carpet)
+	items[355] = &item_renderable;	// featured (bed item)
+}
+
+// item_id(): the includable featured ids come first in FEATURED order (NOT
+// ascending id order), then the remaining ids ascending; count is unchanged.
+TEST(creative_item_id_features_placeables_first) {
+	setup_featured_registry();
+
+	// Total is still every includable id (4 featured + 2 plain), unchanged by
+	// the reorder.
+	ASSERT_EQ(creative_inventory_count(), 6u);
+
+	// Page 1: featured ids in FEATURED order {171,69,77,...,355,...}. Only the
+	// registered subset appears, but their relative order matches FEATURED:
+	// carpet(171), lever(69), button(77), bed(355).
+	ASSERT_EQ(creative_inventory_item_id(0), 171);
+	ASSERT_EQ(creative_inventory_item_id(1), 69);
+	ASSERT_EQ(creative_inventory_item_id(2), 77);
+	ASSERT_EQ(creative_inventory_item_id(3), 355);
+
+	// Tail: the non-featured ids, ascending, after the featured block.
+	ASSERT_EQ(creative_inventory_item_id(4), 5);
+	ASSERT_EQ(creative_inventory_item_id(5), 17);
+
+	// Out of range past the combined list -> 0.
+	ASSERT_EQ(creative_inventory_item_id(6), 0);
+
+	// Every id is emitted exactly once across the whole list: a featured id is
+	// never re-emitted by the ascending tail (no duplicates), and a featured id
+	// absent from the registry (minecart 328, boat 333, doors 324/330) never
+	// surfaces -- the featured loop skips non-includable ids, count stays right.
+	int hits[ITEMS_MAX] = {0};
+	for(size_t i = 0; i < creative_inventory_count(); i++) {
+		uint16_t id = creative_inventory_item_id(i);
+		ASSERT(id > 0 && id < ITEMS_MAX);
+		hits[id]++;
+		ASSERT(hits[id] == 1);
+	}
+	ASSERT_EQ(hits[328], 0);
+	ASSERT_EQ(hits[333], 0);
+	ASSERT_EQ(hits[324], 0);
+	ASSERT_EQ(hits[330], 0);
+}
+
 const test_entry_t g_tests_creative_inventory[] = {
 	{"creative_count_skips_null_unrenderable_and_excluded",
 	 test_creative_count_skips_null_unrenderable_and_excluded},
 	{"creative_item_id_order_bounds_and_excludes",
 	 test_creative_item_id_order_bounds_and_excludes},
+	{"creative_item_id_features_placeables_first",
+	 test_creative_item_id_features_placeables_first},
 };
 
 const size_t g_tests_creative_inventory_count

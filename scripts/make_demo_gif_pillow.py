@@ -62,9 +62,21 @@ def main() -> int:
         return int(m.group(1)) if m else 0
 
     paths.sort(key=idx)
+    total = len(paths)
+    if total == 0:
+        sys.stderr.write("no autoshot_*.png frames in %s\n" % frames_dir)
+        return 1
+    # --start/--step are a 0-based INDEX into the sorted list (same as the shell
+    # script and the ffmpeg path). An empty selection is an error, not an empty
+    # GIF -- e.g. --start beyond the frame count (autoshot files are
+    # tick-numbered, so a tick was likely mistaken for a count).
     paths = paths[start::step]
     if not paths:
-        sys.stderr.write("no autoshot_*.png frames in %s\n" % frames_dir)
+        sys.stderr.write(
+            "no frames selected: --start %d exceeds the %d frames in %s "
+            "(--start is a 0-based index, not a tick number)\n"
+            % (start, total, frames_dir)
+        )
         return 1
 
     # Load + scale to RGB first; dedup on the scaled RGB so the comparison sees

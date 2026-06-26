@@ -17,10 +17,38 @@
 	along with CavEX.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "../daytime.h"
+#include "../network/client_interface.h"
+#include "../network/server_local.h"
 #include "blocks.h"
 
 static enum block_material getMaterial(struct block_info* this) {
 	return MATERIAL_WOOD;
+}
+
+// Sleeping: right-clicking a bed at night fast-forwards the world clock to the
+// next dawn and broadcasts the new time so the client's sky + lighting follow.
+// During the day it does nothing (vanilla Beta behaviour). Single-player, so
+// there is no all-players-asleep handshake; the server simply owns the clock
+// (s->world_time) and re-syncs the client with a one-shot CRPC_TIME_SET (the
+// same RPC used at load). Spawn point is intentionally NOT set (out of scope).
+static void onRightClick(struct server_local* s, struct item_data* it,
+						 struct block_info* where, struct block_info* on,
+						 enum side on_side) {
+	(void)it;
+	(void)where;
+	(void)on;
+	(void)on_side;
+
+	if(!daytime_is_night(s->world_time))
+		return;
+
+	s->world_time = daytime_skip_to_dawn(s->world_time);
+
+	clin_rpc_send(&(struct client_rpc) {
+		.type = CRPC_TIME_SET,
+		.payload.time_set = s->world_time,
+	});
 }
 
 static size_t getBoundingBox(struct block_info* this, bool entity,
@@ -93,7 +121,7 @@ struct block block_bed = {
 	.getTextureIndex = getTextureIndex,
 	.getDroppedItem = getDroppedItem,
 	.onRandomTick = NULL,
-	.onRightClick = NULL,
+	.onRightClick = onRightClick,
 	.transparent = false,
 	.renderBlock = render_block_bed,
 	.renderBlockAlways = NULL,
