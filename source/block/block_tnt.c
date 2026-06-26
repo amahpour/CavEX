@@ -27,15 +27,31 @@ static enum block_material getMaterial(struct block_info* this) {
 // CavEX has no block-tick scheduler, so igniting TNT with flint & steel
 // detonates it instantly: clear a small sphere of blocks (radius 2) to air,
 // including the TNT itself. Bedrock and air are left untouched. No fuse, no
-// primed-TNT entity, no chain reactions, no entity damage, drops or particles.
-// The radius is deliberately tiny to keep the block writes and the resulting
-// remesh inside the Wii MEM1 budget.
-static void onRightClick(struct server_local* s, struct item_data* it,
-						 struct block_info* where, struct block_info* on,
-						 enum side on_side) {
-	// only flint & steel ignites TNT; anything else does nothing
-	if(!it || it->id != ITEM_FLINT_STEEL)
-		return;
+// primed-TNT entity, no entity damage, drops or particles. The radius is
+// deliberately tiny to keep the block writes and the resulting remesh inside
+// the Wii MEM1 budget.
+//
+// Chain reactions: any *other* TNT caught in the sphere is itself detonated,
+// recursing outward so a whole connected cluster goes off from one ignition --
+// still instant. The recursion is bounded HARD two ways so it can never hang or
+// clear unbounded terrain on Wii MEM1: (1) a `depth` cap that decrements per
+// hop and stops at 0, and (2) each TNT is cleared to air *before* recursing into
+// it (clear-before-recurse), so a cell can never be re-triggered and the same
+// TNT is never visited twice. Air and bedrock are always skipped.
+#define TNT_EXPLODE_DEPTH 4
+
+static void tnt_explode(struct server_local* s, w_coord_t x, w_coord_t y,
+						w_coord_t z, int depth) {
+	// Clear the detonating TNT itself first so it is gone before its own sphere
+	// fires -- this is what makes a cell impossible to re-trigger and bounds the
+	// recursion together with the depth cap.
+	server_world_set_block(&s->world, x, y, z,
+						   (struct block_data) {
+							   .type = BLOCK_AIR,
+							   .metadata = 0,
+							   .sky_light = 0,
+							   .torch_light = 0,
+						   });
 
 	for(w_coord_t dx = -2; dx <= 2; dx++) {
 		for(w_coord_t dy = -2; dy <= 2; dy++) {
@@ -44,9 +60,9 @@ static void onRightClick(struct server_local* s, struct item_data* it,
 				if(dx * dx + dy * dy + dz * dz > 4)
 					continue;
 
-				w_coord_t bx = on->x + dx;
-				w_coord_t by = on->y + dy;
-				w_coord_t bz = on->z + dz;
+				w_coord_t bx = x + dx;
+				w_coord_t by = y + dy;
+				w_coord_t bz = z + dz;
 
 				struct block_data blk;
 				if(!server_world_get_block(&s->world, bx, by, bz, &blk))
@@ -55,6 +71,14 @@ static void onRightClick(struct server_local* s, struct item_data* it,
 				// leave air and bedrock alone
 				if(blk.type == BLOCK_AIR || blk.type == BLOCK_BEDROCK)
 					continue;
+
+				// A neighbouring TNT chains: clear-before-recurse, and only while
+				// depth remains. Past the cap it is cleared like any other block
+				// (still no runaway -- it just does not spawn a further sphere).
+				if(blk.type == BLOCK_TNT && depth > 0) {
+					tnt_explode(s, bx, by, bz, depth - 1);
+					continue;
+				}
 
 				server_world_set_block(&s->world, bx, by, bz,
 									   (struct block_data) {
@@ -66,6 +90,16 @@ static void onRightClick(struct server_local* s, struct item_data* it,
 			}
 		}
 	}
+}
+
+static void onRightClick(struct server_local* s, struct item_data* it,
+						 struct block_info* where, struct block_info* on,
+						 enum side on_side) {
+	// only flint & steel ignites TNT; anything else does nothing
+	if(!it || it->id != ITEM_FLINT_STEEL)
+		return;
+
+	tnt_explode(s, on->x, on->y, on->z, TNT_EXPLODE_DEPTH);
 }
 
 static size_t getBoundingBox(struct block_info* this, bool entity,

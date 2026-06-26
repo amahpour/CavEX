@@ -31,6 +31,7 @@ OBJECTS=(
 	"__/source/block/block_smooth_stone.c.o"
 	"__/source/block/block_smooth_sandstone.c.o"
 	"__/source/block/block_oak_wood.c.o"
+	"__/source/block/block_tnt.c.o"
 	"__/source/block/face_occlusion.c.o"
 	"__/source/cNBT/buffer.c.o"
 	"__/source/cNBT/nbt_parsing.c.o"
