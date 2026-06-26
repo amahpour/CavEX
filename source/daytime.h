@@ -20,6 +20,9 @@
 #ifndef DAYTIME_H
 #define DAYTIME_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "cglm/cglm.h"
 
 #define DAY_TICK_MS 50
@@ -31,5 +34,9 @@ float daytime_star_brightness(float time);
 void daytime_sky_colors(float time, vec3 top_plane, vec3 bottom_plane,
 						vec3 atmosphere);
 bool daytime_sunset_colors(float time, vec4 color, float* shift);
+
+// Bed/sleep helpers (issue #117). world_time is the free-running tick counter.
+bool daytime_is_night(uint64_t world_time);
+uint64_t daytime_skip_to_dawn(uint64_t world_time);
 
 #endif

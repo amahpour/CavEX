@@ -70,6 +70,43 @@ TEST(daytime_sky_colors_nether) {
 	ASSERT_NEAR(atmosphere[2], 7.65F, 0.1F);
 }
 
+// Bed/sleep clock helpers (issue #117): the night window and the skip-to-dawn
+// advance that block_bed's onRightClick uses.
+TEST(daytime_is_night_window) {
+	// Daytime ticks are NOT night: dawn (0), morning, noon (6000), dusk start.
+	ASSERT(!daytime_is_night(0));
+	ASSERT(!daytime_is_night(6000));
+	ASSERT(!daytime_is_night(12000));	   // still dusk, before the window
+	ASSERT(!daytime_is_night(23459));	   // just after the window -> day again
+	ASSERT(!daytime_is_night(24000));	   // next dawn
+
+	// Night ticks ARE night: window edges (12541, 23458) and midnight (18000).
+	ASSERT(daytime_is_night(12541));
+	ASSERT(daytime_is_night(18000));
+	ASSERT(daytime_is_night(23458));
+
+	// Works on any day: the same time-of-day on day 3 reads the same.
+	ASSERT(daytime_is_night(18000 + 3 * DAY_LENGTH_TICKS));
+	ASSERT(!daytime_is_night(6000 + 3 * DAY_LENGTH_TICKS));
+}
+
+TEST(daytime_skip_to_dawn_advances_to_next_day_boundary) {
+	// From any tick within day 0, dawn is the next multiple of the day length.
+	ASSERT_EQ(daytime_skip_to_dawn(18000), (uint64_t)DAY_LENGTH_TICKS);
+	ASSERT_EQ(daytime_skip_to_dawn(12541), (uint64_t)DAY_LENGTH_TICKS);
+	// On a later day, it lands on THAT day's following dawn (monotonic; the
+	// saved clock never goes backwards).
+	ASSERT_EQ(daytime_skip_to_dawn(18000 + 2 * DAY_LENGTH_TICKS),
+			  (uint64_t)3 * DAY_LENGTH_TICKS);
+	// Sanity: the result is always a whole-day boundary (time-of-day 0) and
+	// strictly ahead of the input.
+	uint64_t t = 20000 + 5 * DAY_LENGTH_TICKS;
+	uint64_t dawn = daytime_skip_to_dawn(t);
+	ASSERT(dawn > t);
+	ASSERT_EQ(dawn % DAY_LENGTH_TICKS, 0u);
+	ASSERT(!daytime_is_night(dawn));  // and dawn is daytime
+}
+
 const test_entry_t g_tests_daytime[] = {
 	{"daytime_celestial_angle_wrap", test_daytime_celestial_angle_wrap},
 	{"daytime_star_brightness_range", test_daytime_star_brightness_range},
@@ -78,6 +115,9 @@ const test_entry_t g_tests_daytime[] = {
 	{"daytime_brightness_nether", test_daytime_brightness_nether},
 	{"daytime_sky_colors_overworld", test_daytime_sky_colors_overworld},
 	{"daytime_sky_colors_nether", test_daytime_sky_colors_nether},
+	{"daytime_is_night_window", test_daytime_is_night_window},
+	{"daytime_skip_to_dawn_advances_to_next_day_boundary",
+	 test_daytime_skip_to_dawn_advances_to_next_day_boundary},
 };
 
 const size_t g_tests_daytime_count
