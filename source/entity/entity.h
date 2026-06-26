@@ -138,9 +138,12 @@ void entity_boat(uint32_t id, struct entity* e, bool server, void* world);
 // forward/turn are each -1/0/+1. No engine state, so it is unit-testable.
 void entity_boat_steer(float* yaw, vec3 vel, int forward, int turn);
 
-// Rideable minecart (boat-style; issue chosen scope). Same constructor shape as
-// the boat and reuses the boat steering + data.boat state, but rolls on land
-// under gravity (no buoyancy) instead of floating. Tagged ENTITY_MINECART.
+// Rideable minecart that follows rails (issue #111). Same constructor shape as
+// the boat and reuses the data.boat state (yaw, passenger_id, control_forward),
+// but its server tick is rail-following Minecraft Beta 1.7.3 physics: on a rail
+// it snaps to the track centre line and moves only along the track (straights,
+// curves and slopes); powered rails accelerate/brake it; off-rail it just
+// settles under gravity + strong friction. Tagged ENTITY_MINECART.
 void entity_minecart(uint32_t id, struct entity* e, bool server, void* world);
 
 // Minecart box dimensions (blocks) and physics tuning, shared by the server
@@ -149,7 +152,59 @@ void entity_minecart(uint32_t id, struct entity* e, bool server, void* world);
 #define MINECART_HEIGHT 0.7F
 #define MINECART_LENGTH 0.98F
 #define MINECART_GRAVITY 0.04F // downward pull per tick while airborne
-#define MINECART_DRAG 0.95F	   // idle horizontal damping (carts coast further)
+
+// Rail-follow tuning (issue #111). MAX_SPEED is the hard horizontal cap chosen
+// below the per-tick distance that would cross a chunk edge in one step, so a
+// cart can never outrun chunk loading (no chunk-skip / teleport). ACCEL is the
+// push a powered rail adds along the current direction each tick; a powered rail
+// that is *unpowered* brakes by BRAKE (a fraction of speed kept per tick) and
+// stops outright once slower than STOP. PUSH is the per-tick impulse a rider's
+// forward/back intent adds along/against the track.
+#define MINECART_MAX_SPEED 0.35F // hard cap on along-track speed (blocks/tick)
+#define MINECART_ACCEL 0.04F	 // powered-rail push along the track per tick
+#define MINECART_BRAKE 0.5F		 // speed fraction kept/tick on an unpowered rail
+#define MINECART_STOP 0.02F		 // below this along-track speed the cart halts
+#define MINECART_PUSH 0.02F		 // rider forward/back impulse along the track
+
+// Pure rail math (issue #111) — no engine/world state, so unit-testable.
+//
+// minecart_rail_direction: given a rail metadata value (already masked to its
+// shape bits, 0..9), write the two track-end offsets (relative to the rail
+// block, in {-1,0,1}) into `end0`/`end1`. The Beta offset matrix is the source
+// of truth for which way each shape connects; the cart moves between the ends.
+// Returns false for an out-of-range shape (then the offsets are left untouched).
+bool minecart_rail_ends(int shape, ivec3 end0, ivec3 end1);
+
+// Horizontal unit direction of a rail shape, derived from its end offsets
+// (end1 - end0, y dropped, normalised). Writes {dx,0,dz} into `dir_out` and
+// returns true; returns false (dir_out untouched) for an out-of-range shape.
+// For a straight/slope this is the track axis; for a curve it is the (diagonal)
+// chord between the two ends -- use minecart_rail_travel_dir for the actual
+// direction a moving cart takes through a shape.
+bool minecart_rail_direction(int shape, vec3 dir_out);
+
+// Direction a cart with horizontal velocity `vel_in` travels through a rail of
+// the given shape, written as a horizontal unit vector into `dir_out`.
+//   - Straights/slopes (0..5): the track axis, with its sense chosen to match
+//     the cart's current motion (so it keeps going the way it travels); if the
+//     cart is at rest the axis is returned in its default (+) sense.
+//   - Curves (6..9): the two ends are perpendicular arms; the cart exits via the
+//     arm its velocity points most toward (dot-product), i.e. it rounds the bend
+//     onto the outgoing arm instead of driving straight off the diagonal. At
+//     rest it defaults to end1's arm.
+// Returns true on success; false (dir_out untouched) for an out-of-range shape.
+bool minecart_rail_travel_dir(int shape, const vec3 vel_in, vec3 dir_out);
+
+// Project the horizontal velocity onto the track unit direction `dir` (so the
+// cart only moves along the rail, never across it) and write the result back
+// into `vel` x/z. `dir` must be horizontal+normalised (minecart_rail_direction).
+// The vertical component vel[1] is left untouched. Sign of the projection is
+// preserved so the cart keeps its travel direction along the track.
+void minecart_project_velocity(vec3 vel, const vec3 dir);
+
+// Clamp the horizontal speed of `vel` to `cap` (scale x/z together so the
+// heading is preserved); vertical is untouched. No-op when already at/under cap.
+void minecart_speed_cap(vec3 vel, float cap);
 
 // Pure motor math: while `powered`, add MOTOR_THRUST along the heading into the
 // x/z velocity, then clamp the horizontal speed to MOTOR_MAX_SPEED so a cruising

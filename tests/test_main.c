@@ -88,6 +88,9 @@ extern const size_t g_tests_creative_inventory_count;
 extern const test_entry_t g_tests_boat[];
 extern const size_t g_tests_boat_count;
 
+extern const test_entry_t g_tests_minecart[];
+extern const size_t g_tests_minecart_count;
+
 extern const test_entry_t g_tests_block_tnt[];
 extern const size_t g_tests_block_tnt_count;
 
@@ -98,8 +101,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[29];
-static const size_t group_count = 29;
+static test_group_t groups[30];
+static const size_t group_count = 30;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -137,6 +140,7 @@ static void init_groups(void) {
 	groups[27] = (test_group_t){g_tests_boat, g_tests_boat_count};
 	groups[28]
 		= (test_group_t){g_tests_block_tnt, g_tests_block_tnt_count};
+	groups[29] = (test_group_t){g_tests_minecart, g_tests_minecart_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {
