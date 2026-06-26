@@ -23,6 +23,31 @@
 #include "game/game_state.h"
 #include "util.h"
 
+// Sleepable night window, in ticks within the 0..DAY_LENGTH_TICKS day cycle.
+// Matches Minecraft Beta 1.7.3: a bed may be used from dusk (~12541) until just
+// before dawn (~23458); dawn is tick 0. Outside this window it is "day" and a
+// bed does nothing.
+#define NIGHT_START_TICKS 12541
+#define NIGHT_END_TICKS 23458
+
+// True when `world_time` (a free-running tick counter) currently falls in the
+// sleepable night window. world_time is reduced modulo the day length first, so
+// it works on any day. Pure -- no game state -- so it is unit-tested directly.
+bool daytime_is_night(uint64_t world_time) {
+	uint64_t tod = world_time % DAY_LENGTH_TICKS;
+	return tod >= NIGHT_START_TICKS && tod <= NIGHT_END_TICKS;
+}
+
+// The next dawn at or after `world_time`: the next whole-day boundary (a
+// multiple of DAY_LENGTH_TICKS), i.e. time-of-day 0. Advancing the server clock
+// to this value skips the remainder of the night while keeping the counter
+// monotonic (so saved LEVEL_TIME never goes backwards). If world_time is already
+// exactly a day boundary this returns the FOLLOWING dawn (a full day later);
+// callers only invoke it at night, so that case never arises in practice.
+uint64_t daytime_skip_to_dawn(uint64_t world_time) {
+	return (world_time / DAY_LENGTH_TICKS + 1) * (uint64_t)DAY_LENGTH_TICKS;
+}
+
 float daytime_brightness(float time) {
 	return (gstate.world.dimension == WORLD_DIM_OVERWORLD) ?
 		glm_clamp(cosf(daytime_celestial_angle(time) * 2.0F * GLM_PIf) * 2.0F
