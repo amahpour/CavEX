@@ -17,6 +17,8 @@
 	along with CavEX.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "../item/window_container.h"
+#include "../network/client_interface.h"
 #include "../network/server_local.h"
 #include "blocks.h"
 
@@ -70,10 +72,12 @@ static size_t getDroppedItem(struct block_info* this, struct item_data* it,
 	return 1;
 }
 
-static void onRandomTick(struct server_local* s, struct block_info* this) {
-	if(this->block->sky_light < 9 && this->block->torch_light < 9)
-		return;
-
+// One growth step for a sapling: while it is young (age < 3) bump its age by
+// one, otherwise try to spawn the tree (trunk + leaf canopy). Factored out of
+// onRandomTick so bone meal (onRightClick) can drive the exact same growth
+// rather than forking a second copy. Callers gate on light themselves; this does
+// not (bone meal works regardless of light level, like vanilla).
+static void grow_sapling(struct server_local* s, struct block_info* this) {
 	int age = this->block->metadata >> 2;
 	int tree_type = this->block->metadata & 3;
 
@@ -128,6 +132,48 @@ static void onRandomTick(struct server_local* s, struct block_info* this) {
 	}
 }
 
+static void onRandomTick(struct server_local* s, struct block_info* this) {
+	// Natural growth only in sufficient light; one step per tick.
+	if(this->block->sky_light < 9 && this->block->torch_light < 9)
+		return;
+
+	grow_sapling(s, this);
+}
+
+// Bone meal: right-clicking a sapling with the dye item (CavEX has a single dye,
+// id 351, used as bone meal) grows it into a tree immediately -- the same result
+// the slow growth eventually produces -- and consumes one dye in survival.
+static void onRightClick(struct server_local* s, struct item_data* it,
+						 struct block_info* where, struct block_info* on,
+						 enum side on_side) {
+	(void)where;
+	(void)on_side;
+
+	// only the dye item acts as bone meal; anything else does nothing
+	if(!it || it->id != ITEM_DYE)
+		return;
+
+	// Force the final stage so a single application spawns the tree (when there
+	// is headroom) instead of merely advancing one age step. grow_sapling reads
+	// `on->block`, which is a server-local copy, so this mutation is safe.
+	on->block->metadata = (3 << 2) | (on->block->metadata & 3);
+	grow_sapling(s, on);
+
+	// Mirror the SRPC_BLOCK_PLACE consume: one dye spent in survival, none in
+	// creative, and tell the client its hotbar slot changed.
+	if(!s->player.creative) {
+		size_t slot = inventory_get_hotbar(&s->player.inventory);
+		inventory_consume(&s->player.inventory, slot + INVENTORY_SLOT_HOTBAR);
+		clin_rpc_send(&(struct client_rpc) {
+			.type = CRPC_INVENTORY_SLOT,
+			.payload.inventory_slot.window = WINDOWC_INVENTORY,
+			.payload.inventory_slot.slot = slot + INVENTORY_SLOT_HOTBAR,
+			.payload.inventory_slot.item
+			= s->player.inventory.items[slot + INVENTORY_SLOT_HOTBAR],
+		});
+	}
+}
+
 struct block block_sapling = {
 	.name = "Sapling",
 	.getSideMask = getSideMask,
@@ -136,7 +182,7 @@ struct block block_sapling = {
 	.getTextureIndex = getTextureIndex,
 	.getDroppedItem = getDroppedItem,
 	.onRandomTick = onRandomTick,
-	.onRightClick = NULL,
+	.onRightClick = onRightClick,
 	.transparent = false,
 	.renderBlock = render_block_cross,
 	.renderBlockAlways = NULL,
