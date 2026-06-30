@@ -160,6 +160,7 @@ add_executable(cavex
 				source/platform/displaylist.c
 				source/platform/gfx.c
 				source/platform/input.c
+				source/platform/input_config.c
 				source/platform/demo_input.c
 				source/platform/thread.c
 				source/platform/time.c

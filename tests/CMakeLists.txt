@@ -35,6 +35,7 @@ add_library(cavex_testlib STATIC
 	${CMAKE_SOURCE_DIR}/source/entity/entity_boat.c
 	${CMAKE_SOURCE_DIR}/source/entity/entity_minecart.c
 	${CMAKE_SOURCE_DIR}/source/platform/demo_input.c
+	${CMAKE_SOURCE_DIR}/source/platform/input_config.c
 	${CMAKE_SOURCE_DIR}/source/game/state_export.c
 	${CMAKE_SOURCE_DIR}/source/game/gui/map_projection.c
 	${CMAKE_SOURCE_DIR}/source/game/gui/creative_inventory_list.c
@@ -87,6 +88,7 @@ add_executable(cavex_tests
 	test_entity.c
 	test_entity_tick.c
 	test_double_tap.c
+	test_input_routing.c
 	test_boat.c
 	test_minecart.c
 	test_demo.c

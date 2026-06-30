@@ -56,6 +56,7 @@ OBJECTS=(
 	"__/source/entity/entity_boat.c.o"
 	"__/source/entity/entity_minecart.c.o"
 	"__/source/platform/demo_input.c.o"
+	"__/source/platform/input_config.c.o"
 	"__/source/game/state_export.c.o"
 	"__/source/game/gui/map_projection.c.o"
 	"__/source/game/gui/creative_inventory_list.c.o"
