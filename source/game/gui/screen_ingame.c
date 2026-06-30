@@ -36,6 +36,9 @@ static void screen_ingame_reset(struct screen* s, int width, int height) {
 
 	if(gstate.local_player)
 		gstate.local_player->data.local_player.capture_input = true;
+	// Split-screen: player 2 captures input too (its own device).
+	if(gstate.local_player2)
+		gstate.local_player2->data.local_player.capture_input = true;
 }
 
 void screen_ingame_render3D(struct screen* s, mat4 view) {

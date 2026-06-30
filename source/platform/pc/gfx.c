@@ -75,21 +75,47 @@ static GLuint create_shader(const char* vertex, const char* fragment) {
 
 static int window_width = 854;
 static int window_height = 480;
+// Current viewport (defaults to the whole window). Split-screen narrows this for
+// each player's pass; gfx_width()/gfx_height() report it so all the aspect-ratio,
+// 2D-ortho and HUD-centering code adapts to the half being drawn with no changes.
+static int vp_x = 0, vp_y = 0, vp_w = 854, vp_h = 480;
 GLFWwindow* window;
 
 int gfx_width() {
-	return window_width;
+	return vp_w;
 }
 
 int gfx_height() {
+	return vp_h;
+}
+
+int gfx_window_width() {
+	return window_width;
+}
+
+int gfx_window_height() {
 	return window_height;
+}
+
+void gfx_viewport(int x, int y, int width, int height) {
+	vp_x = x;
+	vp_y = y;
+	vp_w = width;
+	vp_h = height;
+	// glViewport's origin is bottom-left; our screen/2D coords are top-left, so
+	// flip y against the true window height.
+	glViewport(x, window_height - y - height, width, height);
+}
+
+void gfx_viewport_full() {
+	gfx_viewport(0, 0, window_width, window_height);
 }
 
 static void framebuffer_size_callback(GLFWwindow* window, int width,
 									  int height) {
 	window_width = width;
 	window_height = height;
-	glViewport(0, 0, gfx_width(), gfx_height());
+	gfx_viewport_full();
 	// A resize/maximize drops the X11/XWayland pointer grab; re-establish the
 	// gameplay cursor lock so the cursor can't escape the window mid-play.
 	input_pointer_reassert();
@@ -189,6 +215,9 @@ void gfx_setup() {
 	gfx_bind_texture(&texture_terrain);
 
 	glUniform1i(glGetUniformLocation(shader_prog, "tex"), 0);
+
+	// Sync the viewport to the (possibly maximized) framebuffer size resolved above.
+	gfx_viewport_full();
 }
 
 static float colors[256];
@@ -234,8 +263,9 @@ void gfx_bind_texture(struct tex_gfx* tex) {
 void gfx_copy_framebuffer(uint8_t* dest, size_t* width, size_t* height) {
 	assert(width && height);
 
-	*width = gfx_width();
-	*height = gfx_height();
+	// Always the full framebuffer, independent of any active split-screen viewport.
+	*width = gfx_window_width();
+	*height = gfx_window_height();
 
 	if(!dest)
 		return;

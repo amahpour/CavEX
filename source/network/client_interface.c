@@ -139,6 +139,10 @@ void clin_process(struct client_rpc* call) {
 	if(gstate.local_player)
 		gstate.local_player
 			= dict_entity_get(gstate.entities, gstate.local_player_id);
+	// Same for the split-screen second player (issue #23).
+	if(gstate.local_player2)
+		gstate.local_player2
+			= dict_entity_get(gstate.entities, gstate.local_player2_id);
 
 	switch(call->type) {
 		case CRPC_CHUNK:
@@ -168,6 +172,17 @@ void clin_process(struct client_rpc* call) {
 					(vec3) {call->payload.player_pos.position[0],
 							call->payload.player_pos.position[1],
 							call->payload.player_pos.position[2]});
+			// Split-screen: co-locate player 2 with player 1 on (re)spawn /
+			// teleport (these events are infrequent: load, dimension change).
+			if(gstate.local_player2) {
+				gstate.local_player2->teleport(
+					gstate.local_player2,
+					(vec3) {call->payload.player_pos.position[0],
+							call->payload.player_pos.position[1],
+							call->payload.player_pos.position[2]});
+				gstate.camera2.rx = gstate.camera.rx;
+				gstate.camera2.ry = gstate.camera.ry;
+			}
 			gstate.world_loaded = true;
 			break;
 		case CRPC_WORLD_RESET:
@@ -195,11 +210,35 @@ void clin_process(struct client_rpc* call) {
 			gstate.world_loaded = false;
 			gstate.world.dimension = call->payload.world_reset.dimension;
 
-			gstate.local_player = dict_entity_safe_get(
-				gstate.entities, call->payload.world_reset.local_entity);
 			gstate.local_player_id = call->payload.world_reset.local_entity;
-			entity_local_player(call->payload.world_reset.local_entity,
-								gstate.local_player, &gstate.world);
+			gstate.local_player = dict_entity_safe_get(gstate.entities,
+													   gstate.local_player_id);
+			entity_local_player(gstate.local_player_id, gstate.local_player,
+								&gstate.world);
+
+			// Local split-screen (issue #23): create a second, client-side player
+			// entity driven by input device 1. The server does not know about it
+			// (player 1 owns the position + chunk-loading sync); player 2 is
+			// co-located with player 1 on each (re)spawn via CRPC_PLAYER_POS.
+			if(gstate.num_local_players >= 2) {
+				gstate.local_player2_id = entity_gen_id(gstate.entities);
+				gstate.local_player2 = dict_entity_safe_get(
+					gstate.entities, gstate.local_player2_id);
+				entity_local_player(gstate.local_player2_id,
+									gstate.local_player2, &gstate.world);
+				gstate.local_player2->data.local_player.device = 1;
+			} else {
+				gstate.local_player2 = NULL;
+				gstate.local_player2_id = 0;
+			}
+
+			// The inserts above may have rehashed the dict; re-resolve the cached
+			// pointers from their stable ids.
+			gstate.local_player = dict_entity_get(gstate.entities,
+												  gstate.local_player_id);
+			if(gstate.num_local_players >= 2)
+				gstate.local_player2 = dict_entity_get(gstate.entities,
+													   gstate.local_player2_id);
 
 			if(gstate.current_screen == &screen_ingame)
 				screen_set(&screen_load_world);

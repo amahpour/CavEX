@@ -58,6 +58,15 @@ struct game_state {
 	struct entity* local_player;	// CACHED pointer into `entities` — invalid
 									// after any dict mutation; re-resolve from id
 	uint32_t local_player_id;
+	// Local split-screen co-op (issue #23). num_local_players is 1 by default; when
+	// 2 the renderer draws two viewports and a second client-side player entity is
+	// driven from input device 1. While 1, the *2 fields stay zeroed and every
+	// existing single-player path (which uses the fields above) is untouched.
+	int num_local_players;
+	struct camera camera2;
+	struct camera_ray_result camera_hit2;
+	struct entity* local_player2; // CACHED; re-resolve from id after dict mutate
+	uint32_t local_player2_id;
 	dict_entity_t entities;
 	uint64_t world_time;
 	ptime_t world_time_start;
@@ -78,6 +87,10 @@ struct game_state {
 			size_t old_slot;
 		} switch_item;
 	} held_item_animation;
+	// Player 2's independent interaction state (split-screen). Mirrors `digging`
+	// and `held_item_animation` above; used only when num_local_players == 2.
+	struct digging digging2;
+	struct held_anim held_item_animation2;
 	bool world_loaded;
 };
 

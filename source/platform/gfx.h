@@ -52,8 +52,22 @@ void gfx_finish(bool vsync);
 void gfx_flip_buffers(float* gpu_wait, float* vsync_wait);
 void gfx_bind_texture(struct tex_gfx* tex);
 void gfx_clear_buffers(uint8_t r, uint8_t g, uint8_t b);
+// Current viewport size. Equal to the window size in normal (full-screen)
+// rendering, but during a split-screen pass it is the half being drawn, so all
+// existing aspect-ratio / 2D-ortho / HUD-centering code that reads these adapts to
+// the viewport automatically. Use gfx_window_* for the true framebuffer size.
 int gfx_width(void);
 int gfx_height(void);
+int gfx_window_width(void);
+int gfx_window_height(void);
+
+// Restrict rendering (3D and 2D) to a sub-rectangle of the framebuffer and remap
+// normalized device coords onto it; gfx_width()/gfx_height() then report this
+// rect. Used by local split-screen to draw each player into one half. Coordinates
+// are top-left origin (matching the 2D ortho), in framebuffer pixels.
+void gfx_viewport(int x, int y, int width, int height);
+// Reset the viewport to the whole window (the default each frame).
+void gfx_viewport_full(void);
 
 void gfx_copy_framebuffer(uint8_t* dest, size_t* width, size_t* height);
 

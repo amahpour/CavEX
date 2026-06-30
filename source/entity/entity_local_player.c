@@ -111,6 +111,11 @@ static uint32_t boat_in_reach(vec3 feet) {
 static bool entity_tick(struct entity* e) {
 	assert(e);
 
+	// Which local input device drives this player (0 = P1, 1 = split-screen P2).
+	// All input queries in this tick go through the _dev variants so two local
+	// players move and look independently from their own key-sets.
+	int device = e->data.local_player.device;
+
 	// --- Boat riding (issue #34) -----------------------------------------
 	// While mounted the player runs no physics of its own: it forwards steer
 	// input to the server-authoritative boat and rides along, snapping the
@@ -127,19 +132,19 @@ static bool entity_tick(struct entity* e) {
 			bool dismount = false;
 
 			if(e->data.local_player.capture_input) {
-				if(input_held(IB_FORWARD))
+				if(input_held_dev(IB_FORWARD, device))
 					forward++;
-				if(input_held(IB_BACKWARD))
+				if(input_held_dev(IB_BACKWARD, device))
 					forward--;
-				if(input_held(IB_RIGHT))
+				if(input_held_dev(IB_RIGHT, device))
 					turn++;
-				if(input_held(IB_LEFT))
+				if(input_held_dev(IB_LEFT, device))
 					turn--;
 				// Dismount on sneak only. Using the place/use button (IB_ACTION2)
 				// would also fire a block place on the Wii, where input_pressed()
 				// is level-per-poll and not consumed between the player tick and
 				// the in-game screen's place handler in the same frame.
-				dismount = input_pressed(IB_SNEAK);
+				dismount = input_pressed_dev(IB_SNEAK, device);
 			}
 
 			svin_rpc_send(&(struct server_rpc) {
@@ -175,7 +180,7 @@ static bool entity_tick(struct entity* e) {
 	if(e->data.local_player.capture_input) {
 		uint32_t boat = boat_in_reach(
 			(vec3) {e->pos[0], e->pos[1] - EYE_HEIGHT, e->pos[2]});
-		if(boat && input_pressed(IB_ACTION2)) {
+		if(boat && input_pressed_dev(IB_ACTION2, device)) {
 			e->data.local_player.riding_boat_id = boat;
 			return false; // ride begins next tick
 		}
@@ -205,20 +210,20 @@ static bool entity_tick(struct entity* e) {
 	bool sneaking = false;
 
 	if(e->data.local_player.capture_input) {
-		if(input_held(IB_FORWARD))
+		if(input_held_dev(IB_FORWARD, device))
 			forward++;
 
-		if(input_held(IB_BACKWARD))
+		if(input_held_dev(IB_BACKWARD, device))
 			forward--;
 
-		if(input_held(IB_RIGHT))
+		if(input_held_dev(IB_RIGHT, device))
 			strafe++;
 
-		if(input_held(IB_LEFT))
+		if(input_held_dev(IB_LEFT, device))
 			strafe--;
 
-		jumping = input_held(IB_JUMP);
-		sneaking = input_held(IB_SNEAK);
+		jumping = input_held_dev(IB_JUMP, device);
+		sneaking = input_held_dev(IB_SNEAK, device);
 
 		// Rising edge of jump, sampled at the 20 Hz tick. We must NOT call
 		// input_pressed(IB_JUMP) here: input_held(IB_JUMP) above already calls
@@ -402,6 +407,7 @@ void entity_local_player(uint32_t id, struct entity* e, struct world* w) {
 	e->teleport = entity_default_teleport;
 	e->type = ENTITY_LOCAL_PLAYER;
 	e->data.local_player.capture_input = false;
+	e->data.local_player.device = 0; // player 1 by default; P2 set to 1 by caller
 
 	entity_default_init(e, false, w);
 	e->data.local_player.jump_ticks = 0;
