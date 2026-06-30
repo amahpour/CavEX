@@ -78,7 +78,8 @@ extern unsigned trap_srpc_seq;
 // held_item_animation / local_player draws that player with no per-callsite
 // changes; calling it again restores player 1. A swap (not a copy) means player
 // 2's camera/aim updated during its pass are preserved back into the *2 fields.
-static void mp_swap_active_view(void) {
+// Declared in game_state.h so the in-game screen can run player 2's interaction.
+void mp_swap_active_view(void) {
 	struct camera tc = gstate.camera;
 	gstate.camera = gstate.camera2;
 	gstate.camera2 = tc;
@@ -156,6 +157,16 @@ int main(void) {
 			src = demo_input_create_from_env();
 		if(src)
 			input_set_virtual_source(src);
+
+		// Split-screen (issue #23): player 2 can be scripted independently via
+		// CAVEX_DEMO2 on input device 1, so the rig can demo full two-player
+		// gameplay (both players acting) in one deterministic run.
+		if(gstate.num_local_players >= 2) {
+			struct input_virtual_source* src2
+				= demo_input_create_from_env_dev(1);
+			if(src2)
+				input_set_virtual_source_dev(1, src2);
+		}
 	}
 #endif
 

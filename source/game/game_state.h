@@ -96,4 +96,11 @@ struct game_state {
 
 extern struct game_state gstate;
 
+// Local split-screen (issue #23): swap player 1 <-> player 2 view state in the
+// canonical gstate fields (camera, camera_hit, digging, held_item_animation,
+// local_player + id). Used by the renderer and the in-game screen to run each
+// local player through the existing single-player code paths; calling it twice is
+// a no-op. Defined in main.c.
+void mp_swap_active_view(void);
+
 #endif

@@ -157,7 +157,11 @@ void screen_ingame_render3D(struct screen* s, mat4 view) {
 	gfx_depth_range(0.0F, 1.0F);
 }
 
-static void screen_ingame_update(struct screen* s, float dt) {
+// Per-player world interaction (place / dig / punch) for the ACTIVE player in the
+// canonical gstate fields, reading input from `device`. The split-screen caller
+// swaps player 2 into those fields before calling with device 1. The inventory /
+// hotbar is shared between local players in this milestone (Scope A).
+static void ingame_interact(int device) {
 	// While riding a boat the player steers instead of interacting with the
 	// world (issue #34): suppress block place/dig so a board/steer tap never
 	// also places or mines a block. This is also what keeps the board tap from
@@ -169,7 +173,7 @@ static void screen_ingame_update(struct screen* s, float dt) {
 	if(riding)
 		gstate.digging.active = false;
 
-	if(!riding && gstate.camera_hit.hit && input_pressed(IB_ACTION2)
+	if(!riding && gstate.camera_hit.hit && input_pressed_dev(IB_ACTION2, device)
 	   && !gstate.digging.active) {
 		svin_rpc_send(&(struct server_rpc) {
 			.type = SRPC_BLOCK_PLACE,
@@ -263,10 +267,10 @@ static void screen_ingame_update(struct screen* s, float dt) {
 			gstate.digging.active = false;
 		}
 
-		if(input_released(IB_ACTION1))
+		if(input_released_dev(IB_ACTION1, device))
 			gstate.digging.active = false;
 	} else {
-		if(!riding && gstate.camera_hit.hit && input_held(IB_ACTION1)
+		if(!riding && gstate.camera_hit.hit && input_held_dev(IB_ACTION1, device)
 		   && time_diff_ms(gstate.digging.cooldown, time_get()) >= 250) {
 			gstate.digging.active = true;
 			gstate.digging.start = time_get();
@@ -285,7 +289,7 @@ static void screen_ingame_update(struct screen* s, float dt) {
 		}
 	}
 
-	if(input_held(IB_ACTION1)
+	if(input_held_dev(IB_ACTION1, device)
 	   && time_diff_s(gstate.held_item_animation.punch.start, time_get())
 		   >= 0.2F) {
 		gstate.held_item_animation.punch.start = time_get();
@@ -316,7 +320,24 @@ static void screen_ingame_update(struct screen* s, float dt) {
 				gstate.camera_hit.side);
 		}
 	}
+}
 
+static void screen_ingame_update(struct screen* s, float dt) {
+	// Player 1 interacts from device 0 and its own aim.
+	ingame_interact(0);
+
+	// Split-screen player 2: swap its view-state into the canonical fields, run
+	// the same interaction from device 1, then swap player 1 back. Player 2 acts
+	// on the aim resolved during the previous frame's render pass (one-frame
+	// latency, imperceptible in play).
+	if(gstate.num_local_players == 2 && gstate.local_player2) {
+		mp_swap_active_view();
+		ingame_interact(1);
+		mp_swap_active_view();
+	}
+
+	// The remainder is player-1 only: hotbar scroll, menu, inventory, map. Player 2
+	// has no scroll/menu bindings in this milestone and the inventory is shared.
 	size_t slot = inventory_get_hotbar(
 		windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]));
 	bool old_item_exists = inventory_get_hotbar_item(
