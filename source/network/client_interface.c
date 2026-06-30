@@ -424,7 +424,20 @@ void clin_update() {
 			.payload.player_pos.z = gstate.camera.z,
 			.payload.player_pos.rx = -glm_deg(gstate.camera.rx),
 			.payload.player_pos.ry = glm_deg(gstate.camera.ry) - 90.0F,
+			.payload.player_pos.player = 0,
 		});
+		// Split-screen (issue #23): report player 2's position too, so the server
+		// extends chunk loading around it and the two can explore apart.
+		if(gstate.num_local_players == 2 && gstate.local_player2)
+			svin_rpc_send(&(struct server_rpc) {
+				.type = SRPC_PLAYER_POS,
+				.payload.player_pos.x = gstate.camera2.x,
+				.payload.player_pos.y = gstate.camera2.y,
+				.payload.player_pos.z = gstate.camera2.z,
+				.payload.player_pos.rx = -glm_deg(gstate.camera2.rx),
+				.payload.player_pos.ry = glm_deg(gstate.camera2.ry) - 90.0F,
+				.payload.player_pos.player = 1,
+			});
 		last_pos_update = time_get();
 	}
 }
