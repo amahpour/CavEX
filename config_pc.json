@@ -25,6 +25,19 @@
 		"screenshot": [291],
 		"map": [77],
 		"toggle_creative": [67],
-		"creative_page": [82]
+		"creative_page": [82],
+
+		"player2_forward": [73],
+		"player2_backward": [75],
+		"player2_left": [74],
+		"player2_right": [76],
+		"player2_jump": [344],
+		"player2_sneak": [345],
+		"player2_action_left": [44],
+		"player2_action_right": [46],
+		"player2_look_up": [265],
+		"player2_look_down": [264],
+		"player2_look_left": [263],
+		"player2_look_right": [262]
 	}
 }

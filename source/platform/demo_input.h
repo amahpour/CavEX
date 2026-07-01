@@ -122,6 +122,11 @@ bool agent_parse_action(const char* line, struct agent_action* out);
 // The returned source is owned by the module (static storage); do not free it.
 struct input_virtual_source* demo_input_create_from_env(void);
 
+// Build a file-replay source for a specific local device (split-screen). device 0
+// uses CAVEX_DEMO (== demo_input_create_from_env), device 1 uses CAVEX_DEMO2.
+// Returns NULL (gameplay unchanged) when that env var is unset or unreadable.
+struct input_virtual_source* demo_input_create_from_env_dev(int device);
+
 // Build a LIVE virtual source that reads action lines from stdin, when
 // CAVEX_AGENT=1 is set (otherwise returns NULL and gameplay is unchanged). With
 // CAVEX_AGENT_GATED=1 the source blocks per tick until the next action line

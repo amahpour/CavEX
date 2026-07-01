@@ -66,6 +66,11 @@ bool server_world_furthest_chunk(struct server_world* w, w_coord_t dist,
 								 w_coord_t px, w_coord_t pz, w_coord_t* x,
 								 w_coord_t* z);
 
+// Split-screen (issue #23): furthest loaded chunk beyond `dist` of BOTH players.
+bool server_world_furthest_chunk_2p(struct server_world* w, w_coord_t dist,
+									w_coord_t px, w_coord_t pz, w_coord_t px2,
+									w_coord_t pz2, w_coord_t* x, w_coord_t* z);
+
 bool server_world_is_chunk_loaded(struct server_world* w, w_coord_t x,
 								  w_coord_t z);
 bool server_world_load_chunk(struct server_world* w, w_coord_t x, w_coord_t z,

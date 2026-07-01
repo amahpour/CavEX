@@ -266,6 +266,8 @@ struct demo_file_source {
 };
 
 static struct demo_file_source demo_file_source_storage;
+// Second storage for the split-screen player 2 demo source (CAVEX_DEMO2).
+static struct demo_file_source demo_file_source_storage2;
 
 static void demo_file_step_tick(struct input_virtual_source* self, int tick) {
 	struct demo_file_source* s = (struct demo_file_source*)self;
@@ -303,14 +305,17 @@ static bool demo_file_at_end(struct input_virtual_source* self) {
 	return s->tick > s->script.frames[s->script.count - 1].tick;
 }
 
-struct input_virtual_source* demo_input_create_from_env(void) {
-	const char* path = getenv("CAVEX_DEMO");
+// Load a demo script at `path` into `s` and wire it as a virtual source. Returns
+// &s->base, or NULL if the path is unset/unreadable/unparseable (gameplay then
+// unchanged). Shared by the device-0 and device-1 (split-screen) entry points.
+static struct input_virtual_source* demo_load(const char* path,
+											  struct demo_file_source* s) {
 	if(!path || !path[0])
 		return NULL;
 
 	FILE* f = fopen(path, "rb");
 	if(!f) {
-		fprintf(stderr, "[demo] could not open CAVEX_DEMO '%s'\n", path);
+		fprintf(stderr, "[demo] could not open demo '%s'\n", path);
 		return NULL;
 	}
 
@@ -318,7 +323,7 @@ struct input_virtual_source* demo_input_create_from_env(void) {
 	long size = ftell(f);
 	if(size < 0 || size > 1 << 20) { // 1 MiB cap is plenty for a script
 		fclose(f);
-		fprintf(stderr, "[demo] CAVEX_DEMO '%s' too large or unreadable\n", path);
+		fprintf(stderr, "[demo] demo '%s' too large or unreadable\n", path);
 		return NULL;
 	}
 	fseek(f, 0, SEEK_SET);
@@ -332,7 +337,6 @@ struct input_virtual_source* demo_input_create_from_env(void) {
 	buf[got] = '\0';
 	fclose(f);
 
-	struct demo_file_source* s = &demo_file_source_storage;
 	memset(s, 0, sizeof(*s));
 
 	int err_line = 0;
@@ -359,6 +363,17 @@ struct input_virtual_source* demo_input_create_from_env(void) {
 
 	printf("[demo] replaying '%s' (%zu keyframes)\n", path, s->script.count);
 	return &s->base;
+}
+
+struct input_virtual_source* demo_input_create_from_env(void) {
+	return demo_load(getenv("CAVEX_DEMO"), &demo_file_source_storage);
+}
+
+struct input_virtual_source* demo_input_create_from_env_dev(int device) {
+	if(device <= 0)
+		return demo_load(getenv("CAVEX_DEMO"), &demo_file_source_storage);
+	// Split-screen player 2 replays CAVEX_DEMO2 on its own source/storage.
+	return demo_load(getenv("CAVEX_DEMO2"), &demo_file_source_storage2);
 }
 
 // -----------------------------------------------------------------------------

@@ -60,6 +60,11 @@ struct entity {
 		struct entity_local_player {
 			int jump_ticks;
 			bool capture_input;
+			// Local input device this player reads (0 = player 1 / original
+			// bindings, 1 = local split-screen player 2). Threaded into the
+			// input_*_dev() queries in the player tick so two local players move
+			// and look independently from their own key-sets.
+			int device;
 			bool flying;
 			// Client mirror of the server's creative flag (HUD + dig-timer
 			// gate only; the server stays authoritative). Set by CRPC_GAMEMODE.
