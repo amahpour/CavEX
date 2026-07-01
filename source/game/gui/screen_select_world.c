@@ -134,6 +134,15 @@ static void screen_sworld_update(struct screen* s, float dt) {
 	if(input_pressed(IB_GUI_DOWN) && gui_selection < stack_size(worlds) - 1)
 		gui_selection++;
 
+	// Local split-screen (issue #23): choose 1 or 2 players before entering a
+	// world. LEFT/RIGHT cycles the count; it is applied on play below and
+	// persists across visits to this screen. CAVEX_2P seeds the initial value for
+	// the headless rig.
+	if(input_pressed(IB_GUI_RIGHT) && gstate.num_local_players < 2)
+		gstate.num_local_players++;
+	if(input_pressed(IB_GUI_LEFT) && gstate.num_local_players > 1)
+		gstate.num_local_players--;
+
 	if(scroll_offset + (int)gui_selection * entry_height < 4)
 		scroll_offset = side_padding - (int)gui_selection * entry_height;
 
@@ -215,9 +224,19 @@ static void screen_sworld_render2D(struct screen* s, int width, int height) {
 
 	gfx_scissor(false, 0, 0, 0, 0);
 
+	// Local split-screen (issue #23): show the chosen player count prominently
+	// above the control row so it is obvious before entering a world.
+	char players[32];
+	snprintf(players, sizeof(players), "%d Player%s", gstate.num_local_players,
+			 gstate.num_local_players == 1 ? "" : "s");
+	gutil_text((width - gutil_font_width(players, 16)) / 2, bottom_visible + 6,
+			   players, 16, true);
+
 	int icon_offset = 32;
 	icon_offset
 		+= gutil_control_icon(icon_offset, IB_GUI_UP, "Change selection");
+	// LEFT/RIGHT toggles 1 vs 2 players (both keys work; the glyph shows one).
+	icon_offset += gutil_control_icon(icon_offset, IB_GUI_LEFT, "1/2 players");
 	icon_offset += gutil_control_icon(icon_offset, IB_GUI_CLICK, "Play world");
 	icon_offset += gutil_control_icon(icon_offset, IB_HOME, "Quit");
 }
