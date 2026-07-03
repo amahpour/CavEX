@@ -48,6 +48,13 @@ struct server_local {
 		struct inventory inventory;
 		struct inventory* active_inventory;
 	} player;
+	// Local split-screen player 2 (issue #23): position only, used solely to
+	// extend chunk loading so the two players can roam apart (the tether fix).
+	// Player 2 shares player 1's inventory/save in this milestone; it is not a
+	// full server player. has_pos2 stays false in single-player, so the chunk
+	// loop below is byte-identical when there is one player.
+	double player2_x, player2_y, player2_z;
+	bool has_pos2;
 	struct server_world world;
 	dict_entity_t entities;
 	uint64_t world_time;

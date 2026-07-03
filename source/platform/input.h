@@ -48,8 +48,20 @@ enum input_button {
 	// all-blocks grid be paged from the keyboard so the demo rig can show every
 	// page; ignored outside the creative inventory screen.
 	IB_CREATIVE_PAGE,
+	// Discrete look buttons. Player 1 looks with the mouse, so these stay unbound
+	// for device 0; the local split-screen player 2 (keyboard-only, no second
+	// mouse) steers the camera with them. input_joystick_dev() synthesises a look
+	// delta from them for devices >= 1.
+	IB_LOOK_UP,
+	IB_LOOK_DOWN,
+	IB_LOOK_LEFT,
+	IB_LOOK_RIGHT,
 	IB_COUNT,
 };
+
+// Number of local input devices (split-screen players). Device 0 is the original
+// single-player path; device 1 is local player 2.
+#define INPUT_MAX_DEVICES 2
 
 enum input_category {
 	INPUT_CAT_WIIMOTE,
@@ -67,6 +79,20 @@ bool input_pressed(enum input_button b);
 bool input_released(enum input_button b);
 bool input_held(enum input_button b);
 bool input_joystick(float dt, float* x, float* y);
+
+// Pure mapping (button, device) -> config JSON key, or NULL when the button is
+// unbound for that device. device 0 == the original single-player bindings;
+// device 1 == "player2_*". Implemented in input_config.c with no platform deps so
+// it is unit-testable (see tests/test_input_routing.c).
+const char* input_config_key(enum input_button b, int device);
+
+// Device-indexed input queries. The non-_dev variants above are exact aliases for
+// device 0, so every existing single-player caller is unchanged. Local split-
+// screen routes player 2's entity/camera through device 1.
+bool input_pressed_dev(enum input_button b, int device);
+bool input_released_dev(enum input_button b, int device);
+bool input_held_dev(enum input_button b, int device);
+bool input_joystick_dev(float dt, float* x, float* y, int device);
 void input_pointer_enable(bool enable);
 // Re-establish the gameplay cursor lock after a window event (resize/maximize/
 // focus-gain) drops the pointer grab. No-op on Wii and while in menus.
@@ -93,14 +119,24 @@ struct input_virtual_source {
 	bool (*at_end)(struct input_virtual_source* self);
 };
 
-// Install (or, with NULL, remove) the active virtual source.
+// Install (or, with NULL, remove) the active virtual source for device 0.
 void input_set_virtual_source(struct input_virtual_source* src);
-// The currently installed source, or NULL for hardware input.
+// The currently installed source for device 0, or NULL for hardware input.
 struct input_virtual_source* input_get_virtual_source(void);
-// Advance the active source by one tick (no-op when none is installed).
+// Advance every installed source by one tick (no-op for devices with none).
 void input_virtual_step_tick(int tick);
-// True when a virtual source is installed and its script has finished.
+// True when device 0's source is installed and its script has finished. Device 0
+// is the primary; the dual-player demo makes both scripts the same length so the
+// run ends when the primary does.
 bool input_virtual_at_end(void);
+
+// Per-device virtual source, for the local split-screen demo (one scripted source
+// per player). device 0's _dev calls are equivalent to the non-_dev ones above.
+void input_set_virtual_source_dev(int device, struct input_virtual_source* src);
+struct input_virtual_source* input_get_virtual_source_dev(int device);
+// True when ANY installed source has finished -- the dual demo stops as soon as
+// either player's script is exhausted.
+bool input_virtual_any_at_end(void);
 #endif
 
 #endif

@@ -92,6 +92,28 @@ int gfx_height() {
 	return 480;
 }
 
+int gfx_window_width() {
+	return gfx_screen_width;
+}
+
+int gfx_window_height() {
+	return 480;
+}
+
+// Local split-screen (issue #23) is PC-only; Wii 2-player is out of scope. These
+// exist for link-compatibility with the shared gfx API and are never called on
+// the single-player Wii path (main.c only narrows the viewport when there are two
+// local players), so single-player rendering is unchanged.
+void gfx_viewport(int x, int y, int width, int height) {
+	GX_SetViewport(x, y, width, height, 0, 1);
+	GX_SetScissor(x, y, width, height);
+}
+
+void gfx_viewport_full(void) {
+	GX_SetViewport(0, 0, gfx_screen_width, 480, 0, 1);
+	GX_SetScissor(0, 0, gfx_screen_width, 480);
+}
+
 void gfx_setup() {
 	VIDEO_Init();
 	screenMode = VIDEO_GetPreferredMode(NULL);

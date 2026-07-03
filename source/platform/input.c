@@ -466,16 +466,18 @@ void input_native_joystick(float dt, float* dx, float* dy) {
 #include "../game/game_state.h"
 
 #ifdef PLATFORM_PC
-// Virtual-input (demo-replay) source. NULL = normal hardware input, so when no
-// demo is loaded every query below falls through to the real input path and
-// behaviour is identical to a build without the rig. See input.h / demo_input.h.
-static struct input_virtual_source* input_virtual_src = NULL;
+// Virtual-input (demo-replay) sources, one per local device. NULL = normal
+// hardware input for that device, so when no demo is loaded every query below
+// falls through to the real input path and behaviour is identical to a build
+// without the rig. Device 0 is the primary (single-player demo); device 1 drives
+// local split-screen player 2 in the dual-player demo. See input.h/demo_input.h.
+static struct input_virtual_source* input_virtual_src[INPUT_MAX_DEVICES];
 
 // Button state latched at the last tick boundary so that input_pressed /
 // input_released report exactly one edge per tick transition, independent of
-// how many frames (and thus query calls) fall within a tick.
-static bool input_virtual_cur[IB_COUNT];
-static bool input_virtual_prev[IB_COUNT];
+// how many frames (and thus query calls) fall within a tick. Indexed by device.
+static bool input_virtual_cur[INPUT_MAX_DEVICES][IB_COUNT];
+static bool input_virtual_prev[INPUT_MAX_DEVICES][IB_COUNT];
 
 // The 20 Hz accumulator (main.c) can step the virtual source SEVERAL times per
 // rendered frame, but the consumers run once per frame: input_pressed() in the
@@ -484,94 +486,92 @@ static bool input_virtual_prev[IB_COUNT];
 // not the last in its frame, and reading the source's per-tick look once per
 // frame loses every earlier tick's delta. So we LATCH edges and ACCUMULATE look
 // across all ticks stepped within a frame; the consumers drain the latch once.
-static bool input_virtual_pending_press[IB_COUNT];
-static bool input_virtual_pending_release[IB_COUNT];
-static float input_virtual_look_dx;
-static float input_virtual_look_dy;
+static bool input_virtual_pending_press[INPUT_MAX_DEVICES][IB_COUNT];
+static bool input_virtual_pending_release[INPUT_MAX_DEVICES][IB_COUNT];
+static float input_virtual_look_dx[INPUT_MAX_DEVICES];
+static float input_virtual_look_dy[INPUT_MAX_DEVICES];
+
+void input_set_virtual_source_dev(int device, struct input_virtual_source* src) {
+	if(device < 0 || device >= INPUT_MAX_DEVICES)
+		return;
+
+	input_virtual_src[device] = src;
+	for(int b = 0; b < IB_COUNT; b++) {
+		input_virtual_cur[device][b] = input_virtual_prev[device][b] = false;
+		input_virtual_pending_press[device][b] = false;
+		input_virtual_pending_release[device][b] = false;
+	}
+	input_virtual_look_dx[device] = input_virtual_look_dy[device] = 0.0F;
+}
 
 void input_set_virtual_source(struct input_virtual_source* src) {
-	input_virtual_src = src;
-	for(int b = 0; b < IB_COUNT; b++) {
-		input_virtual_cur[b] = input_virtual_prev[b] = false;
-		input_virtual_pending_press[b] = input_virtual_pending_release[b] = false;
-	}
-	input_virtual_look_dx = input_virtual_look_dy = 0.0F;
+	input_set_virtual_source_dev(0, src);
+}
+
+struct input_virtual_source* input_get_virtual_source_dev(int device) {
+	if(device < 0 || device >= INPUT_MAX_DEVICES)
+		return NULL;
+	return input_virtual_src[device];
 }
 
 struct input_virtual_source* input_get_virtual_source(void) {
-	return input_virtual_src;
+	return input_get_virtual_source_dev(0);
 }
 
 void input_virtual_step_tick(int tick) {
-	if(!input_virtual_src)
-		return;
+	for(int d = 0; d < INPUT_MAX_DEVICES; d++) {
+		struct input_virtual_source* src = input_virtual_src[d];
+		if(!src)
+			continue;
 
-	if(input_virtual_src->step_tick)
-		input_virtual_src->step_tick(input_virtual_src, tick);
+		if(src->step_tick)
+			src->step_tick(src, tick);
 
-	// Snapshot the per-tick button levels and roll the previous set forward, then
-	// LATCH any edge into a pending flag that survives until a consumer drains it
-	// -- so a press/release on a non-final tick of a multi-tick frame is not lost.
-	for(int b = 0; b < IB_COUNT; b++) {
-		input_virtual_prev[b] = input_virtual_cur[b];
-		input_virtual_cur[b] = input_virtual_src->get_button
-			? input_virtual_src->get_button(input_virtual_src,
-											(enum input_button)b)
-			: false;
-		if(input_virtual_cur[b] && !input_virtual_prev[b])
-			input_virtual_pending_press[b] = true;
-		if(!input_virtual_cur[b] && input_virtual_prev[b])
-			input_virtual_pending_release[b] = true;
-	}
+		// Snapshot the per-tick button levels and roll the previous set forward,
+		// then LATCH any edge into a pending flag that survives until a consumer
+		// drains it -- so a press/release on a non-final tick of a multi-tick
+		// frame is not lost.
+		for(int b = 0; b < IB_COUNT; b++) {
+			input_virtual_prev[d][b] = input_virtual_cur[d][b];
+			input_virtual_cur[d][b] = src->get_button
+				? src->get_button(src, (enum input_button)b)
+				: false;
+			if(input_virtual_cur[d][b] && !input_virtual_prev[d][b])
+				input_virtual_pending_press[d][b] = true;
+			if(!input_virtual_cur[d][b] && input_virtual_prev[d][b])
+				input_virtual_pending_release[d][b] = true;
+		}
 
-	// Drain this tick's look delta and ACCUMULATE it; input_joystick() applies
-	// (and clears) the sum once per frame. Summing means every stepped tick's
-	// rotation reaches the camera even when several ticks share one frame.
-	if(input_virtual_src->get_look) {
-		float dx = 0.0F, dy = 0.0F;
-		input_virtual_src->get_look(input_virtual_src, &dx, &dy);
-		input_virtual_look_dx += dx;
-		input_virtual_look_dy += dy;
+		// Drain this tick's look delta and ACCUMULATE it; input_joystick_dev()
+		// applies (and clears) the sum once per frame. Summing means every stepped
+		// tick's rotation reaches the camera even when several ticks share a frame.
+		if(src->get_look) {
+			float dx = 0.0F, dy = 0.0F;
+			src->get_look(src, &dx, &dy);
+			input_virtual_look_dx[d] += dx;
+			input_virtual_look_dy[d] += dy;
+		}
 	}
 }
 
 bool input_virtual_at_end(void) {
-	return input_virtual_src && input_virtual_src->at_end
-		&& input_virtual_src->at_end(input_virtual_src);
+	struct input_virtual_source* src = input_virtual_src[0];
+	return src && src->at_end && src->at_end(src);
+}
+
+bool input_virtual_any_at_end(void) {
+	for(int d = 0; d < INPUT_MAX_DEVICES; d++) {
+		struct input_virtual_source* src = input_virtual_src[d];
+		if(src && src->at_end && src->at_end(src))
+			return true;
+	}
+	return false;
 }
 #endif
 
-static const char* input_config_translate(enum input_button key) {
-	switch(key) {
-		case IB_ACTION1: return "input.item_action_left";
-		case IB_ACTION2: return "input.item_action_right";
-		case IB_FORWARD: return "input.player_forward";
-		case IB_BACKWARD: return "input.player_backward";
-		case IB_LEFT: return "input.player_left";
-		case IB_RIGHT: return "input.player_right";
-		case IB_JUMP: return "input.player_jump";
-		case IB_SNEAK: return "input.player_sneak";
-		case IB_INVENTORY: return "input.inventory";
-		case IB_HOME: return "input.open_menu";
-		case IB_SCROLL_LEFT: return "input.scroll_left";
-		case IB_SCROLL_RIGHT: return "input.scroll_right";
-		case IB_GUI_UP: return "input.gui_up";
-		case IB_GUI_DOWN: return "input.gui_down";
-		case IB_GUI_LEFT: return "input.gui_left";
-		case IB_GUI_RIGHT: return "input.gui_right";
-		case IB_GUI_CLICK: return "input.gui_click";
-		case IB_GUI_CLICK_ALT: return "input.gui_click_alt";
-		case IB_SCREENSHOT: return "input.screenshot";
-		case IB_MAP: return "input.map";
-		case IB_TOGGLE_CREATIVE: return "input.toggle_creative";
-		case IB_CREATIVE_PAGE: return "input.creative_page";
-		default: return NULL;
-	}
-}
-
 bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 				  enum input_category* category) {
-	const char* key = input_config_translate(b);
+	const char* key = input_config_key(b, 0);
 
 	if(!key)
 		return false;
@@ -579,8 +579,7 @@ bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 	size_t length = 8;
 	int mapping[length];
 
-	if(!config_read_int_array(&gstate.config_user, input_config_translate(b),
-							  mapping, &length))
+	if(!config_read_int_array(&gstate.config_user, key, mapping, &length))
 		return false;
 
 	int priority = 0;
@@ -603,20 +602,20 @@ bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 	return has_any;
 }
 
-bool input_pressed(enum input_button b) {
+bool input_pressed_dev(enum input_button b, int device) {
 #ifdef PLATFORM_PC
-	if(input_virtual_src) {
+	if(device >= 0 && device < INPUT_MAX_DEVICES && input_virtual_src[device]) {
 		// Drain the latched rising edge (set by input_virtual_step_tick for any
 		// tick in this frame). Returning it once and clearing keeps a per-frame
 		// consumer from firing the action repeatedly within the tick, and the
 		// latch keeps an edge from a non-final tick of the frame alive until read.
-		bool edge = input_virtual_pending_press[b];
-		input_virtual_pending_press[b] = false;
+		bool edge = input_virtual_pending_press[device][b];
+		input_virtual_pending_press[device][b] = false;
 		return edge;
 	}
 #endif
 
-	const char* key = input_config_translate(b);
+	const char* key = input_config_key(b, device);
 
 	if(!key)
 		return false;
@@ -624,8 +623,7 @@ bool input_pressed(enum input_button b) {
 	size_t length = 8;
 	int mapping[length];
 
-	if(!config_read_int_array(&gstate.config_user, input_config_translate(b),
-							  mapping, &length))
+	if(!config_read_int_array(&gstate.config_user, key, mapping, &length))
 		return false;
 
 	bool any_pressed = false;
@@ -646,17 +644,21 @@ bool input_pressed(enum input_button b) {
 	return any_pressed && !any_held && !any_released;
 }
 
-bool input_released(enum input_button b) {
+bool input_pressed(enum input_button b) {
+	return input_pressed_dev(b, 0);
+}
+
+bool input_released_dev(enum input_button b, int device) {
 #ifdef PLATFORM_PC
-	if(input_virtual_src) {
-		// Drain the latched falling edge (see input_pressed()).
-		bool edge = input_virtual_pending_release[b];
-		input_virtual_pending_release[b] = false;
+	if(device >= 0 && device < INPUT_MAX_DEVICES && input_virtual_src[device]) {
+		// Drain the latched falling edge (see input_pressed_dev()).
+		bool edge = input_virtual_pending_release[device][b];
+		input_virtual_pending_release[device][b] = false;
 		return edge;
 	}
 #endif
 
-	const char* key = input_config_translate(b);
+	const char* key = input_config_key(b, device);
 
 	if(!key)
 		return false;
@@ -664,8 +666,7 @@ bool input_released(enum input_button b) {
 	size_t length = 8;
 	int mapping[length];
 
-	if(!config_read_int_array(&gstate.config_user, input_config_translate(b),
-							  mapping, &length))
+	if(!config_read_int_array(&gstate.config_user, key, mapping, &length))
 		return false;
 
 	bool any_pressed = false;
@@ -686,13 +687,17 @@ bool input_released(enum input_button b) {
 	return !any_pressed && !any_held && any_released;
 }
 
-bool input_held(enum input_button b) {
+bool input_released(enum input_button b) {
+	return input_released_dev(b, 0);
+}
+
+bool input_held_dev(enum input_button b, int device) {
 #ifdef PLATFORM_PC
-	if(input_virtual_src)
-		return input_virtual_cur[b];
+	if(device >= 0 && device < INPUT_MAX_DEVICES && input_virtual_src[device])
+		return input_virtual_cur[device][b];
 #endif
 
-	const char* key = input_config_translate(b);
+	const char* key = input_config_key(b, device);
 
 	if(!key)
 		return false;
@@ -700,8 +705,7 @@ bool input_held(enum input_button b) {
 	size_t length = 8;
 	int mapping[length];
 
-	if(!config_read_int_array(&gstate.config_user, input_config_translate(b),
-							  mapping, &length))
+	if(!config_read_int_array(&gstate.config_user, key, mapping, &length))
 		return false;
 
 	bool any_pressed = false;
@@ -719,18 +723,49 @@ bool input_held(enum input_button b) {
 	return any_pressed || any_held;
 }
 
-bool input_joystick(float dt, float* x, float* y) {
+bool input_held(enum input_button b) {
+	return input_held_dev(b, 0);
+}
+
+bool input_joystick_dev(float dt, float* x, float* y, int device) {
 #ifdef PLATFORM_PC
-	if(input_virtual_src) {
+	if(device >= 0 && device < INPUT_MAX_DEVICES && input_virtual_src[device]) {
 		// Apply the look delta accumulated across every tick stepped since the
 		// last camera poll, then clear it (drained once per frame).
-		*x = input_virtual_look_dx;
-		*y = input_virtual_look_dy;
-		input_virtual_look_dx = input_virtual_look_dy = 0.0F;
+		*x = input_virtual_look_dx[device];
+		*y = input_virtual_look_dy[device];
+		input_virtual_look_dx[device] = input_virtual_look_dy[device] = 0.0F;
 		return true;
 	}
 #endif
 
-	input_native_joystick(dt, x, y);
+	if(device == 0) {
+		// Player 1 looks with the mouse (PC) or the joystick/IR (Wii).
+		input_native_joystick(dt, x, y);
+		return true;
+	}
+
+	// Devices >= 1 have no pointer of their own (one mouse, shared keyboard), so
+	// the camera is steered with the discrete IB_LOOK_* keys. The magnitude is a
+	// per-frame constant tuned to roughly match a comfortable mouse turn rate;
+	// camera_attach() scales it by 2 like the mouse delta.
+	const float look_speed = 0.018F;
+	float lx = 0.0F, ly = 0.0F;
+
+	if(input_held_dev(IB_LOOK_LEFT, device))
+		lx += look_speed;
+	if(input_held_dev(IB_LOOK_RIGHT, device))
+		lx -= look_speed;
+	if(input_held_dev(IB_LOOK_UP, device))
+		ly += look_speed;
+	if(input_held_dev(IB_LOOK_DOWN, device))
+		ly -= look_speed;
+
+	*x = lx;
+	*y = ly;
 	return true;
+}
+
+bool input_joystick(float dt, float* x, float* y) {
+	return input_joystick_dev(dt, x, y, 0);
 }

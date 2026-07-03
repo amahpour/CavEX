@@ -224,6 +224,40 @@ bool server_world_furthest_chunk(struct server_world* w, w_coord_t dist,
 	return found;
 }
 
+// Split-screen variant (issue #23): the furthest loaded chunk (measured from
+// player 1) that is beyond `dist` of BOTH players, so a chunk one player still
+// needs is never unloaded. Used only when a second local player is present; the
+// single-player path keeps calling server_world_furthest_chunk unchanged.
+bool server_world_furthest_chunk_2p(struct server_world* w, w_coord_t dist,
+									w_coord_t px, w_coord_t pz, w_coord_t px2,
+									w_coord_t pz2, w_coord_t* x, w_coord_t* z) {
+	assert(w && x && z);
+
+	dict_server_chunks_it_t it;
+	dict_server_chunks_it(it, w->chunks);
+
+	w_coord_t furthest_dist2 = -1;
+	bool found = false;
+	while(!dict_server_chunks_end_p(it)) {
+		int64_t id = dict_server_chunks_ref(it)->key;
+		w_coord_t cx = S_CHUNK_X(id);
+		w_coord_t cz = S_CHUNK_Z(id);
+		w_coord_t d = CHUNK_DIST2(px, cx, pz, cz);
+		dict_server_chunks_next(it);
+
+		bool beyond1 = abs(px - cx) > dist || abs(pz - cz) > dist;
+		bool beyond2 = abs(px2 - cx) > dist || abs(pz2 - cz) > dist;
+		if(beyond1 && beyond2 && d > furthest_dist2) {
+			*x = cx;
+			*z = cz;
+			furthest_dist2 = d;
+			found = true;
+		}
+	}
+
+	return found;
+}
+
 bool server_world_is_chunk_loaded(struct server_world* w, w_coord_t x,
 								  w_coord_t z) {
 	assert(w);

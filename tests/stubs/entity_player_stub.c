@@ -75,6 +75,18 @@ bool input_pressed(enum input_button b) {
 	return false;
 }
 
+bool input_held_dev(enum input_button b, int device) {
+	(void)b;
+	(void)device;
+	return false;
+}
+
+bool input_pressed_dev(enum input_button b, int device) {
+	(void)b;
+	(void)device;
+	return false;
+}
+
 // entity_local_player.c forwards boat steering through svin_rpc_send(); the real
 // server interface is thread-bound and not compiled into the harness, so provide
 // an inert stub. The boat-riding path is integration-tested in-game, not here.

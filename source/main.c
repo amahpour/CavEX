@@ -72,6 +72,39 @@ extern struct trap_srpc_entry trap_srpc_ring[32];
 extern unsigned trap_srpc_seq;
 #endif
 
+// Local split-screen (issue #23): exchange player 1's and player 2's view state
+// in the canonical gstate fields. Calling it makes the *2 player "active" so that
+// every renderer/HUD that reads gstate.camera / camera_hit / digging /
+// held_item_animation / local_player draws that player with no per-callsite
+// changes; calling it again restores player 1. A swap (not a copy) means player
+// 2's camera/aim updated during its pass are preserved back into the *2 fields.
+// Declared in game_state.h so the in-game screen can run player 2's interaction.
+void mp_swap_active_view(void) {
+	struct camera tc = gstate.camera;
+	gstate.camera = gstate.camera2;
+	gstate.camera2 = tc;
+
+	struct camera_ray_result th = gstate.camera_hit;
+	gstate.camera_hit = gstate.camera_hit2;
+	gstate.camera_hit2 = th;
+
+	struct digging td = gstate.digging;
+	gstate.digging = gstate.digging2;
+	gstate.digging2 = td;
+
+	struct held_anim ta = gstate.held_item_animation;
+	gstate.held_item_animation = gstate.held_item_animation2;
+	gstate.held_item_animation2 = ta;
+
+	struct entity* tp = gstate.local_player;
+	gstate.local_player = gstate.local_player2;
+	gstate.local_player2 = tp;
+
+	uint32_t ti = gstate.local_player_id;
+	gstate.local_player_id = gstate.local_player2_id;
+	gstate.local_player2_id = ti;
+}
+
 int main(void) {
 	gstate.quit = false;
 	gstate.camera = (struct camera) {
@@ -84,6 +117,17 @@ int main(void) {
 	gstate.held_item_animation.switch_item.start = time_get();
 	gstate.digging.cooldown = time_get();
 	gstate.digging.active = false;
+	gstate.held_item_animation2 = gstate.held_item_animation;
+	gstate.digging2 = gstate.digging;
+
+	// Local split-screen co-op (issue #23): single-player by default. CAVEX_2P
+	// (PC) enables a second local player -- vertical split, second camera, input
+	// device 1 (the player2_* bindings).
+	gstate.num_local_players = 1;
+#ifdef PLATFORM_PC
+	if(getenv("CAVEX_2P"))
+		gstate.num_local_players = 2;
+#endif
 
 	rand_gen_seed(&gstate.rand_src);
 
@@ -113,6 +157,16 @@ int main(void) {
 			src = demo_input_create_from_env();
 		if(src)
 			input_set_virtual_source(src);
+
+		// Split-screen (issue #23): player 2 can be scripted independently via
+		// CAVEX_DEMO2 on input device 1, so the rig can demo full two-player
+		// gameplay (both players acting) in one deterministic run.
+		if(gstate.num_local_players >= 2) {
+			struct input_virtual_source* src2
+				= demo_input_create_from_env_dev(1);
+			if(src2)
+				input_set_virtual_source_dev(1, src2);
+		}
 	}
 #endif
 
@@ -319,6 +373,10 @@ int main(void) {
 		if(gstate.local_player)
 			camera_attach(&gstate.camera, gstate.local_player, tick_delta,
 						  gstate.stats.dt);
+		// Split-screen: advance player 2's camera from its own entity + device.
+		if(gstate.local_player2)
+			camera_attach(&gstate.camera2, gstate.local_player2, tick_delta,
+						  gstate.stats.dt);
 
 		bool render_world
 			= gstate.current_screen->render_world && gstate.world_loaded;
@@ -375,68 +433,130 @@ int main(void) {
 		gfx_fog_color(atmosphere_color[0], atmosphere_color[1],
 					  atmosphere_color[2]);
 
-		gfx_mode_world();
-		gfx_matrix_projection(gstate.camera.projection, true);
+		// === per-player view passes ===
+		// Single-player: one full-screen pass, identical to before. Split-screen:
+		// two left/right passes. Player 1 was attached + culled above; for player 2
+		// the active-view state is swapped into the canonical gstate fields so every
+		// renderer below (world, entities, HUD, selection box) draws that player
+		// unchanged, and it is swapped back after the loop.
+		bool split = render_world && gstate.num_local_players == 2
+			&& gstate.local_player2;
+		int view_count = split ? 2 : 1;
 
-		if(render_world) {
-			gfx_update_light(daytime_brightness(daytime),
-							 world_dimension_light(&gstate.world));
+		for(int view = 0; view < view_count; view++) {
+			if(view == 1) {
+				mp_swap_active_view(); // activate player 2
 
-			if(gstate.world.dimension == WORLD_DIM_OVERWORLD)
-				gutil_sky_box(gstate.camera.view_origin, daytime,
-							  top_plane_color, bottom_plane_color);
+				bool p2_water = false;
+				if(render_world) {
+					struct block_data b = world_get_block(
+						&gstate.world, floorf(gstate.camera.x),
+						floorf(gstate.camera.y + 0.1F), floorf(gstate.camera.z));
+					p2_water = b.type == BLOCK_WATER_FLOW
+						|| b.type == BLOCK_WATER_STILL;
+				}
+				camera_update(&gstate.camera, p2_water);
+				world_pre_render(&gstate.world, &gstate.camera,
+								 gstate.camera.view);
+				struct camera* c = &gstate.camera;
+				camera_ray_pick(&gstate.world, c->x, c->y, c->z,
+								c->x + sinf(c->rx) * sinf(c->ry) * 4.5F,
+								c->y + cosf(c->ry) * 4.5F,
+								c->z + cosf(c->rx) * sinf(c->ry) * 4.5F,
+								&gstate.camera_hit);
+			}
 
-			gstate.stats.chunks_rendered
-				= world_render(&gstate.world, &gstate.camera, false);
-		} else {
-			gstate.stats.chunks_rendered = 0;
-		}
+			if(split) {
+				// vertical split: player 1 left half, player 2 right half
+				int half = gfx_window_width() / 2;
+				int vx = (view == 0) ? 0 : half;
+				int vw = (view == 0) ? half : gfx_window_width() - half;
+				gfx_viewport(vx, 0, vw, gfx_window_height());
+				gfx_scissor(true, vx, 0, vw, gfx_window_height());
+			}
 
-		if(gstate.current_screen->render3D) {
-			gfx_fog(false);
-			gstate.current_screen->render3D(gstate.current_screen,
-											gstate.camera.view);
-		}
+			// per-view underwater overlay flag (same camera this pass renders)
+			bool view_in_water = false;
+			if(render_world) {
+				struct block_data wb = world_get_block(
+					&gstate.world, floorf(gstate.camera.x),
+					floorf(gstate.camera.y + 0.1F), floorf(gstate.camera.z));
+				view_in_water = wb.type == BLOCK_WATER_FLOW
+					|| wb.type == BLOCK_WATER_STILL;
+			}
 
-		if(render_world) {
-			gfx_fog(false);
-			particle_render(
-				gstate.camera.view,
-				(vec3) {gstate.camera.x, gstate.camera.y, gstate.camera.z},
-				tick_delta);
-			entities_client_render(gstate.entities, &gstate.camera, tick_delta);
-			gfx_fog(true);
+			gfx_mode_world();
+			gfx_matrix_projection(gstate.camera.projection, true);
 
-			world_render(&gstate.world, &gstate.camera, true);
+			if(render_world) {
+				gfx_update_light(daytime_brightness(daytime),
+								 world_dimension_light(&gstate.world));
 
-			if(gstate.world.dimension == WORLD_DIM_OVERWORLD)
-				gutil_clouds(gstate.camera.view, daytime);
-		}
+				if(gstate.world.dimension == WORLD_DIM_OVERWORLD)
+					gutil_sky_box(gstate.camera.view_origin, daytime,
+								  top_plane_color, bottom_plane_color);
 
-		gfx_mode_gui();
+				gstate.stats.chunks_rendered
+					= world_render(&gstate.world, &gstate.camera, false);
+			} else {
+				gstate.stats.chunks_rendered = 0;
+			}
 
-		if(in_water) {
-			gfx_bind_texture(&texture_water);
-			gutil_texquad_col(0, 0, -gstate.camera.rx / GLM_PI * 256,
-							  gstate.camera.ry / GLM_PI * 256, 512,
-							  512 * (float)gfx_height() / (float)gfx_width(),
-							  gfx_width(), gfx_height(), 0xFF, 0xFF, 0xFF,
-							  0x80);
-		}
+			if(gstate.current_screen->render3D) {
+				gfx_fog(false);
+				gstate.current_screen->render3D(gstate.current_screen,
+												gstate.camera.view);
+			}
+
+			if(render_world) {
+				gfx_fog(false);
+				particle_render(
+					gstate.camera.view,
+					(vec3) {gstate.camera.x, gstate.camera.y, gstate.camera.z},
+					tick_delta);
+				entities_client_render(gstate.entities, &gstate.camera,
+									   tick_delta);
+				gfx_fog(true);
+
+				world_render(&gstate.world, &gstate.camera, true);
+
+				if(gstate.world.dimension == WORLD_DIM_OVERWORLD)
+					gutil_clouds(gstate.camera.view, daytime);
+			}
+
+			gfx_mode_gui();
+
+			if(view_in_water) {
+				gfx_bind_texture(&texture_water);
+				gutil_texquad_col(0, 0, -gstate.camera.rx / GLM_PI * 256,
+								  gstate.camera.ry / GLM_PI * 256, 512,
+								  512 * (float)gfx_height() / (float)gfx_width(),
+								  gfx_width(), gfx_height(), 0xFF, 0xFF, 0xFF,
+								  0x80);
+			}
 
 #ifdef PLATFORM_PC
-		// Zero the wall-clock timing readout so the captured debug overlay is
-		// byte-identical across demo runs (see demo_capture note above).
-		if(demo_capture) {
-			gstate.stats.fps = 0.0F;
-			gstate.stats.dt_gpu = 0.0F;
-			gstate.stats.dt_vsync = 0.0F;
-		}
+			// Zero the wall-clock timing readout so the captured debug overlay is
+			// byte-identical across demo runs (see demo_capture note above).
+			if(demo_capture) {
+				gstate.stats.fps = 0.0F;
+				gstate.stats.dt_gpu = 0.0F;
+				gstate.stats.dt_vsync = 0.0F;
+			}
 #endif
 
-		if(gstate.current_screen->render2D)
-			gstate.current_screen->render2D(gstate.current_screen, gfx_width(),
-											gfx_height());
+			if(gstate.current_screen->render2D)
+				gstate.current_screen->render2D(gstate.current_screen,
+												gfx_width(), gfx_height());
+		}
+
+		if(split) {
+			// restore player 1 (player 2's updated camera/aim go back to the *2
+			// fields) and reset the viewport for the full-screen overlays below.
+			mp_swap_active_view();
+			gfx_viewport_full();
+			gfx_scissor(false, 0, 0, 0, 0);
+		}
 
 		if(input_pressed(IB_SCREENSHOT)) {
 			size_t width, height;

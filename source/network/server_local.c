@@ -199,7 +199,16 @@ static void server_local_process(struct server_rpc* call, void* user) {
 
 	switch(call->type) {
 		case SRPC_PLAYER_POS:
-			if(s->player.finished_loading) {
+			if(call->payload.player_pos.player == 1) {
+				// Split-screen player 2: track position only, to extend chunk
+				// loading (independent exploration). No inventory/world effect.
+				if(s->player.finished_loading) {
+					s->player2_x = call->payload.player_pos.x;
+					s->player2_y = call->payload.player_pos.y;
+					s->player2_z = call->payload.player_pos.z;
+					s->has_pos2 = true;
+				}
+			} else if(s->player.finished_loading) {
 				s->player.x = call->payload.player_pos.x;
 				s->player.y = call->payload.player_pos.y;
 				s->player.z = call->payload.player_pos.z;
@@ -614,6 +623,27 @@ static void server_local_rail_demo_spawn(struct server_local* s) {
 	}
 }
 
+// Track the nearest not-yet-loaded, on-disk chunk inside one player's view
+// square, accumulating into a running best so it can be called once per local
+// player (split-screen, issue #23). Distance is measured to that player, so the
+// chunk closest to whichever player owns it wins.
+static void nl_scan(struct server_world* w, w_coord_t px, w_coord_t pz,
+					bool* found, w_coord_t* bx, w_coord_t* bz, w_coord_t* bd2) {
+	for(w_coord_t z = pz - MAX_VIEW_DISTANCE; z <= pz + MAX_VIEW_DISTANCE; z++) {
+		for(w_coord_t x = px - MAX_VIEW_DISTANCE; x <= px + MAX_VIEW_DISTANCE;
+			x++) {
+			w_coord_t d = CHUNK_DIST2(px, x, pz, z);
+			if(!server_world_is_chunk_loaded(w, x, z) && (!*found || d < *bd2)
+			   && server_world_disk_has_chunk(w, x, z)) {
+				*bd2 = d;
+				*bx = x;
+				*bz = z;
+				*found = true;
+			}
+		}
+	}
+}
+
 static void server_local_update(struct server_local* s) {
 	assert(s);
 
@@ -630,14 +660,25 @@ static void server_local_update(struct server_local* s) {
 
 	w_coord_t px = WCOORD_CHUNK_OFFSET(floor(s->player.x));
 	w_coord_t pz = WCOORD_CHUNK_OFFSET(floor(s->player.z));
+	// Split-screen player 2 (issue #23): when present, chunk loading covers the
+	// union of both players' view squares so they can roam apart. has_pos2 is
+	// false in single-player, so px2/pz2 collapse to player 1 and every call
+	// below is identical to the original single-player behaviour.
+	bool p2 = s->has_pos2;
+	w_coord_t px2 = p2 ? WCOORD_CHUNK_OFFSET(floor(s->player2_x)) : px;
+	w_coord_t pz2 = p2 ? WCOORD_CHUNK_OFFSET(floor(s->player2_z)) : pz;
 
 	server_world_random_tick(&s->world, &s->rand_src, s, px, pz,
 							 MAX_VIEW_DISTANCE - 2);
 
 	w_coord_t cx, cz;
-	if(server_world_furthest_chunk(&s->world, MAX_VIEW_DISTANCE, px, pz, &cx,
-								   &cz)) {
-		// unload just one chunk
+	bool unload = p2 ? server_world_furthest_chunk_2p(&s->world,
+													  MAX_VIEW_DISTANCE, px, pz,
+													  px2, pz2, &cx, &cz)
+					 : server_world_furthest_chunk(&s->world, MAX_VIEW_DISTANCE,
+												   px, pz, &cx, &cz);
+	if(unload) {
+		// unload just one chunk (beyond view of every local player)
 		server_world_save_chunk(&s->world, true, cx, cz);
 		clin_rpc_send(&(struct client_rpc) {
 			.type = CRPC_UNLOAD_CHUNK,
@@ -646,25 +687,16 @@ static void server_local_update(struct server_local* s) {
 		});
 	}
 
-	// iterate over all chunks that should be loaded
+	// load one chunk: the nearest unloaded chunk across the union of both
+	// players' view squares (player 1 first, then player 2 if present).
 	bool c_nearest = false;
 	w_coord_t c_nearest_x, c_nearest_z;
 	w_coord_t c_nearest_dist2 = INT_MAX;
-	for(w_coord_t z = pz - MAX_VIEW_DISTANCE; z <= pz + MAX_VIEW_DISTANCE;
-		z++) {
-		for(w_coord_t x = px - MAX_VIEW_DISTANCE; x <= px + MAX_VIEW_DISTANCE;
-			x++) {
-			w_coord_t d = CHUNK_DIST2(px, x, pz, z);
-			if(!server_world_is_chunk_loaded(&s->world, x, z)
-			   && (d < c_nearest_dist2 || !c_nearest)
-			   && server_world_disk_has_chunk(&s->world, x, z)) {
-				c_nearest_dist2 = d;
-				c_nearest_x = x;
-				c_nearest_z = z;
-				c_nearest = true;
-			}
-		}
-	}
+	nl_scan(&s->world, px, pz, &c_nearest, &c_nearest_x, &c_nearest_z,
+			&c_nearest_dist2);
+	if(p2)
+		nl_scan(&s->world, px2, pz2, &c_nearest, &c_nearest_x, &c_nearest_z,
+				&c_nearest_dist2);
 
 	// load just one chunk
 	struct server_chunk* sc;

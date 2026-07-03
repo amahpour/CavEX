@@ -45,6 +45,11 @@ struct server_rpc {
 		struct {
 			double x, y, z;
 			float rx, ry;
+			// Local player index (split-screen, issue #23). 0 = the primary
+			// player (the only one in single-player; existing senders leave this
+			// zero). 1 = local player 2, whose position the server uses ONLY to
+			// extend chunk loading so the two players can explore apart.
+			uint8_t player;
 		} player_pos;
 		struct {
 			string_t name;
