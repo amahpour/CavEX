@@ -97,6 +97,9 @@ extern const size_t g_tests_block_tnt_count;
 extern const test_entry_t g_tests_input_routing[];
 extern const size_t g_tests_input_routing_count;
 
+extern const test_entry_t g_tests_villager[];
+extern const size_t g_tests_villager_count;
+
 const char* g_current_test = "";
 
 typedef struct {
@@ -104,8 +107,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[31];
-static const size_t group_count = 31;
+static test_group_t groups[32];
+static const size_t group_count = 32;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -146,6 +149,7 @@ static void init_groups(void) {
 	groups[29] = (test_group_t){g_tests_minecart, g_tests_minecart_count};
 	groups[30] = (test_group_t){g_tests_input_routing,
 								g_tests_input_routing_count};
+	groups[31] = (test_group_t){g_tests_villager, g_tests_villager_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {

@@ -31,6 +31,7 @@ enum entity_type {
 	ENTITY_ITEM,
 	ENTITY_BOAT,
 	ENTITY_MINECART,
+	ENTITY_VILLAGER,
 };
 
 struct server_local;
@@ -92,6 +93,13 @@ struct entity {
 						  // (issue #33). Server-only; set from the rider's held
 						  // motor item, cleared on dismount. Runtime state only.
 		} boat;
+		struct entity_villager {
+			float yaw;		  // render/travel heading in radians
+			int idle_timer;	  // ticks until the next wander decision
+			int wander_ticks; // reserved: ticks left in the current move (future)
+			vec3 home;		  // anchor (spawn pos); wander is bounded to
+							  // VILLAGER_WANDER_RANGE of it
+		} villager;
 	} data;
 };
 
@@ -216,6 +224,28 @@ void minecart_speed_cap(vec3 vel, float cap);
 // boat can never chunk-skip. When not powered it is a no-op (the boat coasts on
 // the steering drag from entity_boat_steer). No engine state, so unit-testable.
 void entity_boat_throttle(float yaw, vec3 vel, bool powered);
+
+// Passive villager mob (Epic #28): idles and slowly wanders within a bounded
+// range under gravity + AABB ground collision. Same constructor shape as the
+// boat/minecart. Tagged ENTITY_VILLAGER. No AI/pathfinding/trading/health.
+void entity_villager(uint32_t id, struct entity* e, bool server, void* world);
+
+#define VILLAGER_WIDTH 0.6F
+#define VILLAGER_HEIGHT 1.8F
+#define VILLAGER_LENGTH 0.6F
+#define VILLAGER_GRAVITY 0.04F		// downward pull per tick while airborne
+#define VILLAGER_WANDER_SPEED 0.04F // horizontal blocks/tick — well under the
+									// 0.35 chunk-skip cap the vehicles enforce
+#define VILLAGER_WANDER_RANGE 6.0F	// max blocks from home before it steers back
+#define VILLAGER_IDLE_MIN 20		// min ticks between wander decisions (~1s)
+#define VILLAGER_IDLE_MAX 80		// max ticks between wander decisions (~4s)
+
+// Pure wander math: advance the heading by `turn` (-1/0/+1), set the horizontal
+// velocity to `forward`*`speed` along the NEW heading (x = speed*sin, z =
+// speed*cos), leaving the vertical component vel[1] untouched. forward is 0
+// (stand) or +1 (walk). No engine state, so it is unit-testable.
+void entity_villager_wander(float* yaw, vec3 vel, int turn, int forward,
+							float speed);
 
 uint32_t entity_gen_id(dict_entity_t dict);
 

@@ -104,6 +104,7 @@ add_executable(cavex
 				source/entity/entity_item.c
 				source/entity/entity_boat.c
 				source/entity/entity_minecart.c
+				source/entity/entity_villager.c
 
 				source/cNBT/buffer.c
 				source/cNBT/nbt_loading.c
