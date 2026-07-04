@@ -705,8 +705,10 @@ static void server_local_spawn_villagers(struct server_local* s) {
 					}
 				if(seen)
 					continue;
+				// Stand the villager ON TOP of the surface block (marker is buried
+				// one block under it), not embedded in it: marker_y + 2.
 				server_local_spawn_villager(
-					(vec3) {mx + 0.5F, (float)(y + 1), mz + 0.5F}, 0.0F, s);
+					(vec3) {mx + 0.5F, (float)(y + 2), mz + 0.5F}, 0.0F, s);
 				if(done_n < VILLAGER_MAX_MARKERS) {
 					done_x[done_n] = mx;
 					done_z[done_n] = mz;
