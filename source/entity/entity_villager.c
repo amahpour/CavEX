@@ -118,12 +118,49 @@ static bool entity_villager_server_tick(struct entity* e,
 static void entity_villager_render(struct entity* e, mat4 view,
 								   float tick_delta) {
 #ifndef CAVEX_TEST_BUILD
-	/* Render body is added in the villager rendering issue (#2 of the
-	   sub-epic). Left as a no-op stub here so the file links into the Wii and
-	   PC builds. */
-	(void)e;
-	(void)view;
-	(void)tick_delta;
+	vec3 pos_lerp;
+	glm_vec3_lerp(e->pos_old, e->pos, tick_delta, pos_lerp);
+
+	// Reuse the wool block renderer for a cloth-like body cube (no new art),
+	// exactly like the boat (planks) and minecart (iron) box models. The unit
+	// cube it draws is rotated by the villager's heading and scaled to size.
+	struct item_data body = {.id = BLOCK_WOOL, .durability = 0, .count = 1};
+	struct item* it = item_get(&body);
+
+	if(it) {
+		// Body: full-height cube facing the wander heading.
+		mat4 model;
+		glm_translate_make(model, pos_lerp);
+		glm_rotate_y(model, e->data.villager.yaw, model);
+		glm_scale(model,
+				  (vec3) {VILLAGER_WIDTH, VILLAGER_HEIGHT, VILLAGER_LENGTH});
+		glm_translate(model, (vec3) {-0.5F, -0.5F, -0.5F});
+
+		mat4 mv;
+		glm_mat4_mul(view, model, mv);
+		it->renderItem(it, &body, mv, true, R_ITEM_ENV_ENTITY);
+
+		// Head: a smaller cube perched on top so it reads as a mob, not a
+		// pillar. Same heading; translated up by half the body height.
+		mat4 head;
+		glm_translate_make(head, pos_lerp);
+		glm_rotate_y(head, e->data.villager.yaw, head);
+		glm_translate(head, (vec3) {0.0F, VILLAGER_HEIGHT * 0.5F, 0.0F});
+		glm_scale(head, (vec3) {VILLAGER_WIDTH * 0.75F, VILLAGER_WIDTH * 0.75F,
+								VILLAGER_LENGTH * 0.75F});
+		glm_translate(head, (vec3) {-0.5F, -0.5F, -0.5F});
+
+		mat4 mv_head;
+		glm_mat4_mul(view, head, mv_head);
+		it->renderItem(it, &body, mv_head, true, R_ITEM_ENV_ENTITY);
+	}
+
+	// Thin AABB at the feet -> standard entity shadow (copied from minecart).
+	struct AABB bbox;
+	aabb_setsize_centered(&bbox, VILLAGER_WIDTH, 0.1F, VILLAGER_LENGTH);
+	aabb_translate(&bbox, pos_lerp[0], pos_lerp[1] - VILLAGER_HEIGHT / 2.0F,
+				   pos_lerp[2]);
+	entity_shadow(e, &bbox, view);
 #else
 	(void)e;
 	(void)view;
