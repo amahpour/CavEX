@@ -46,6 +46,9 @@ enum client_rpc_type {
 	// Reuses the spawn_boat payload (entity_id, pos, yaw); the minecart just
 	// constructs a different entity type client-side.
 	CRPC_SPAWN_MINECART,
+	// Reuses the spawn_boat payload (entity_id, pos, yaw); a passive villager,
+	// constructed as a different entity type client-side (issue #129).
+	CRPC_SPAWN_VILLAGER,
 };
 
 struct client_rpc {

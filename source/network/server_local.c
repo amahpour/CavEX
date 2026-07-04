@@ -108,6 +108,31 @@ struct entity* server_local_spawn_minecart(vec3 pos, float yaw,
 	return e;
 }
 
+struct entity* server_local_spawn_villager(vec3 pos, float yaw,
+										   struct server_local* s) {
+	assert(s);
+
+	uint32_t entity_id = entity_gen_id(s->entities);
+	struct entity* e = dict_entity_safe_get(s->entities, entity_id);
+	entity_villager(entity_id, e, true, &s->world);
+	e->data.villager.yaw = yaw;
+	e->teleport(e, pos);
+	// entity_default_teleport does not touch data.villager.home (it stays 0 from
+	// the constructor). Anchor the wander home to the spawn point, else the tick
+	// sees the villager as far beyond WANDER_RANGE of (0,0,0) and it walks off
+	// toward the origin instead of milling around the structure/village.
+	glm_vec3_copy(e->pos, e->data.villager.home);
+
+	clin_rpc_send(&(struct client_rpc) {
+		.type = CRPC_SPAWN_VILLAGER,
+		.payload.spawn_boat.entity_id = e->id,
+		.payload.spawn_boat.pos = {e->pos[0], e->pos[1], e->pos[2]},
+		.payload.spawn_boat.yaw = yaw,
+	});
+
+	return e;
+}
+
 void server_local_spawn_block_drops(struct server_local* s,
 									struct block_info* blk_info) {
 	assert(s && blk_info);
@@ -623,6 +648,76 @@ static void server_local_rail_demo_spawn(struct server_local* s) {
 	}
 }
 
+// Scan loaded near-player chunks for the gen_world structure/village marker and
+// spawn a passive villager above each one, at most once per marker cell per
+// session (issue #129). Session-scoped is correct: entities are never persisted
+// (dict_entity_reset runs on both world load and unload), so re-spawning per
+// session is by design. The marker rides in normal chunk block data and needs no
+// save-format change.
+#define VILLAGER_MARKER_BLOCK_ID BLOCK_MOSSY_COBBLE // == 48, matches gen_world MOSSY
+
+// gen_world buries the marker at a structure origin (classic surf ~55..122) or a
+// village pad (islands VILLAGE_GROUND == 63). Scan the whole band so a village on
+// high or low ground is never missed. Cheap: the window is only a
+// (MAX_VIEW_DISTANCE-2)==1 chunk radius, i.e. at most 3x3 chunks.
+#define VILLAGER_MARKER_Y_LO 50
+#define VILLAGER_MARKER_Y_HI 123
+
+#define VILLAGER_MAX_MARKERS 64 // fixed dedupe table; plenty for the tiny window
+
+static void server_local_spawn_villagers(struct server_local* s) {
+	// Remember which marker cells we already populated this session so a marker
+	// (which persists in block data) is not re-spawned every tick. Session-static
+	// is fine: single-player has exactly one struct server_local, and the table
+	// is reset implicitly on process restart (a new session).
+	static w_coord_t done_x[VILLAGER_MAX_MARKERS];
+	static w_coord_t done_z[VILLAGER_MAX_MARKERS];
+	static int done_n = 0;
+	static int armed = 0;
+	if(++armed < 40) // ~2 s: let the near-player chunks load first
+		return;
+
+	w_coord_t px = WCOORD_CHUNK_OFFSET((w_coord_t)floorf(s->player.x));
+	w_coord_t pz = WCOORD_CHUNK_OFFSET((w_coord_t)floorf(s->player.z));
+	w_coord_t r = MAX_VIEW_DISTANCE - 2; // == 1
+
+	for(w_coord_t cz = pz - r; cz <= pz + r; cz++)
+	for(w_coord_t cx = px - r; cx <= px + r; cx++) {
+		if(!server_world_is_chunk_loaded(&s->world, cx, cz))
+			continue;
+		for(int lx = 0; lx < 16; lx++)
+		for(int lz = 0; lz < 16; lz++) {
+			w_coord_t mx = cx * 16 + lx;
+			w_coord_t mz = cz * 16 + lz;
+			for(w_coord_t y = VILLAGER_MARKER_Y_LO; y <= VILLAGER_MARKER_Y_HI;
+				y++) {
+				struct block_data blk;
+				if(!server_world_get_block(&s->world, mx, y, mz, &blk))
+					continue;
+				if(blk.type != VILLAGER_MARKER_BLOCK_ID)
+					continue;
+				// dedupe: already populated this exact (mx,mz) cell?
+				bool seen = false;
+				for(int i = 0; i < done_n; i++)
+					if(done_x[i] == mx && done_z[i] == mz) {
+						seen = true;
+						break;
+					}
+				if(seen)
+					continue;
+				server_local_spawn_villager(
+					(vec3) {mx + 0.5F, (float)(y + 1), mz + 0.5F}, 0.0F, s);
+				if(done_n < VILLAGER_MAX_MARKERS) {
+					done_x[done_n] = mx;
+					done_z[done_n] = mz;
+					done_n++;
+				}
+				break; // one marker per column
+			}
+		}
+	}
+}
+
 // Track the nearest not-yet-loaded, on-disk chunk inside one player's view
 // square, accumulating into a running best so it can be called once per local
 // player (split-screen, issue #23). Distance is measured to that player, so the
@@ -655,6 +750,7 @@ static void server_local_update(struct server_local* s) {
 	s->world_time++;
 
 	server_local_rail_demo_spawn(s);
+	server_local_spawn_villagers(s);
 
 	entity_tick_all(s->entities, server_local_tick_entity, s);
 
