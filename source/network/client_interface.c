@@ -124,6 +124,7 @@ static void trap_crpc_record(struct client_rpc* call) {
 			e->c = call->payload.spawn_item.pos[2];
 			break;
 		case CRPC_ENTITY_MOVE: e->a = call->payload.entity_move.entity_id; break;
+		case CRPC_SPAWN_VILLAGER: e->a = call->payload.spawn_boat.entity_id; break;
 		default: break;
 	}
 }
@@ -347,6 +348,14 @@ void clin_process(struct client_rpc* call) {
 			entity_minecart(call->payload.spawn_boat.entity_id, e, false,
 							&gstate.world);
 			e->data.boat.yaw = call->payload.spawn_boat.yaw;
+			e->teleport(e, call->payload.spawn_boat.pos);
+		} break;
+		case CRPC_SPAWN_VILLAGER: {
+			struct entity* e = dict_entity_safe_get(
+				gstate.entities, call->payload.spawn_boat.entity_id);
+			entity_villager(call->payload.spawn_boat.entity_id, e, false,
+							&gstate.world);
+			e->data.villager.yaw = call->payload.spawn_boat.yaw;
 			e->teleport(e, call->payload.spawn_boat.pos);
 		} break;
 		case CRPC_PICKUP_ITEM: {

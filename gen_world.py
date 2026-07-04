@@ -546,7 +546,16 @@ def structure_blocks(wx, wz):
     if st is None:
         return None
     ox, oz, kind, surf = st
-    cells = _STRUCT_FN[kind](surf, wx - ox, wz - oz)
+    cells = list(_STRUCT_FN[kind](surf, wx - ox, wz - oz))
+    is_origin = (wx == ox and wz == oz)
+    if is_origin:
+        # Buried villager-spawn marker (issue #129): one block below the origin
+        # surface, so it sits under the levelled foundation and is never exposed.
+        # The server-side chunk scan (server_local_spawn_villagers) keys on MOSSY
+        # (id 48) to place one passive villager per structure. The guard runs
+        # before the empty-cells short-circuit so an origin column whose structure
+        # cells happen to be empty still gets its marker.
+        cells.append((surf - 1, MOSSY, 0))
     if not cells:
         return None
     return (_STRUCT_FOUNDATION[kind], surf, cells)
@@ -572,6 +581,14 @@ VILLAGE_GROUND = SEA_LEVEL + 1                     # flat build height for the w
 VILLAGE_R = 17                                     # village bounding half-extent (Chebyshev)
 # houses as (centre_dx, centre_dz, half_w, half_d) relative to the village centre.
 _HOUSES = [(-11, -8, 3, 2), (-2, 6, 3, 3), (9, -6, 3, 2), (7, 9, 2, 3)]
+# Villager-spawn marker columns for the islands village (issue #129 STEP 2), as
+# (dx, dz) offsets from the village centre. Each is an OPEN pad column (path/grass,
+# not a house footprint), so the passive villager the server spawns lands on clear
+# ground and wanders the pad without being wedged in a house wall. The marker is
+# buried at VILLAGE_GROUND-1 (under the pad top face), never exposed. The server
+# scan (server_local_spawn_villagers) keys on the same MOSSY id as the classic
+# structure marker, so a single scan path covers both world types.
+_VILLAGE_MARKERS = [(0, 0), (3, 0), (-4, 0)]
 
 def in_village(wx, wz):
     return abs(wx - VILLAGE_X) <= VILLAGE_R and abs(wz - VILLAGE_Z) <= VILLAGE_R
@@ -600,6 +617,11 @@ def village_column(blocks, base, wx, wz):
     if house is None:
         onpath = abs(wx - VILLAGE_X) <= 1 or abs(wz - VILLAGE_Z) <= 1
         blocks[base + VG] = GRAVEL if onpath else GRASS
+        # Buried villager-spawn marker on the open pad (issue #129 STEP 2): one
+        # block below the pad top face, so it is never exposed and does not alter
+        # the walk surface. The server spawns a villager here at VG (on the pad).
+        if (wx - VILLAGE_X, wz - VILLAGE_Z) in _VILLAGE_MARKERS:
+            blocks[base + VG - 1] = MOSSY
         return VG
     (hcx, hcz, hw, hd), lx, lz = house
     blocks[base + VG] = COBBLE            # floor
@@ -1051,6 +1073,7 @@ def main():
     struct_glow = 0      # above-ground glowstone (tower beacons / hut lanterns)
     pyramid_caps = 0     # smooth-sandstone cells (only ever a pyramid apex)
     plank_cells = 0      # PLANKS anywhere (islands: only villages use them)
+    mossy_marker = 0     # buried MOSSY villager-spawn markers (issue #129)
     DECOR_IDS = frozenset((DANDELION, ROSE, TALLGRASS, DEADBUSH, BROWN_MUSHROOM,
                            RED_MUSHROOM, CACTUS, REED, PUMPKIN))
     for cz in range(32):
@@ -1081,6 +1104,8 @@ def main():
                             pyramid_caps += 1
                         elif b == PLANKS:
                             plank_cells += 1
+                        elif b == MOSSY:
+                            mossy_marker += 1   # buried villager-spawn marker
                         if top_y < 0:
                             top_y = y
                             if y > region_max:
@@ -1112,6 +1137,11 @@ def main():
         assert region_max < WORLD_HEIGHT, \
             f"a column exceeds the {WORLD_HEIGHT} cap (max y {region_max})"
         assert plank_cells >= 20, f"no village houses (plank cells {plank_cells})"
+        # Buried villager-spawn markers on the village pad (issue #129 STEP 2):
+        # exactly one MOSSY cell per _VILLAGE_MARKERS entry, and none exposed on a
+        # walk surface (they sit at VILLAGE_GROUND-1, under the pad top face).
+        assert mossy_marker == len(_VILLAGE_MARKERS), \
+            f"village villager markers {mossy_marker} != {len(_VILLAGE_MARKERS)}"
         sy, sb = column_top(spawn_chunk, spawn_xin, spawn_zin)
         assert sb in (GRASS, DIRT, STONE, SAND), f"spawn not solid ground (block {sb})"
         assert sy == SPAWN_SURFACE, f"spawn surface y {sy} != computed {SPAWN_SURFACE}"
@@ -1127,6 +1157,7 @@ def main():
         print(f"islands self-check OK: land y{min(heights)}..{max(heights)} "
               f"({len(heights)} heights), ocean {len(lake_cols)} surface cols "
               f"(largest pool {big_ocean}), village plank cells {plank_cells}, "
+              f"villager markers {mossy_marker}, "
               f"NO bedrock, spawn solid at y{sy} (SpawnY {SPAWN_Y}), region max y{region_max}")
         return
 
@@ -1161,6 +1192,10 @@ def main():
     assert decor_count >= 200, f"too little surface decoration ({decor_count} cells)"
     assert (struct_glow + pyramid_caps) >= 1, \
         f"no discoverable structures (glow {struct_glow}, pyramid apexes {pyramid_caps})"
+    # (8b) villager-spawn markers (issue #129): every generated structure buries one
+    # MOSSY cell at its origin (surf-1), under the foundation. There is at least one
+    # structure in-region (asserted above), so there must be at least one marker.
+    assert mossy_marker >= 1, f"no buried villager markers found ({mossy_marker})"
 
     # (4) spawn is safe: solid surface, 2 air blocks of head clearance, and the
     # player's FEET (Pos.y - EYE_HEIGHT) land just above the surface block top.
@@ -1198,6 +1233,7 @@ def main():
           f"lakes {water_cells} water cells (largest pool {biggest_lake}), "
           f"desert {sand_surf} sand cols, decor {decor_count} plants, "
           f"structures (glow {struct_glow} + pyramid apexes {pyramid_caps}), "
+          f"villager markers {mossy_marker}, "
           f"'Claude World' preserved")
 
 if __name__ == "__main__":
