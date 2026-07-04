@@ -123,6 +123,21 @@ STRUCT_MAX_R = 5            # max footprint radius of any structure (<= STRUCT_M
 STRUCT_SPAWN_CLEAR = 40     # no structure within this radius of spawn
 STRUCT_PROB = 0.55          # fraction of grid cells that actually grow a structure
 
+# ---- "islands" world type (son's request) --------------------------------------
+# CAVEX_WORLD_TYPE=islands generates a calm, buildable world of flat land + big
+# oceans + islands + a village, with NO bedrock -- distinct from the hilly biome
+# world above (the default 'classic' keeps that unchanged). A large-cell
+# "continentalness" value-noise field splits the map into ocean and flat island
+# land; a forced land disc guarantees a big flat, buildable, village-bearing island
+# at spawn. All the classic terrain (caves/biomes/structures/bedrock) is bypassed
+# for this type via a dedicated column builder + self-check.
+ISLANDS = os.environ.get("CAVEX_WORLD_TYPE", "classic") == "islands"
+SEA_LEVEL = BASE_Y                 # 62; oceans fill with water up to here
+OCEAN_CELL = 150                   # continentalness patch size (big -> broad seas)
+OCEAN_LEVEL = 0.50                 # continentalness below this -> ocean, else land
+OCEAN_FLOOR_MIN = SEA_LEVEL - 9    # deepest an ocean basin floor is dug
+ISLAND_SPAWN_R = 44                # forced flat-land disc (Chebyshev) around spawn
+
 def h(wx, wz, y, salt):
     """Deterministic pure-stdlib hash -> 32-bit unsigned, seeded from SEED.
 
@@ -281,6 +296,8 @@ def surface_y(wx, wz):
     Bounded to BASE_Y..~100 and hard-capped at 122 (terrain-shape choice; well
     under WORLD_HEIGHT). The taller PC world (#26) keeps the same natural relief
     — extra headroom above is for player builds, not bigger natural mountains."""
+    if ISLANDS:
+        return islands_surface_y(wx, wz)
     hills = _value_noise(wx, wz, CELL)            # broad relief
     peaks = _value_noise(wx, wz, CELL * 3)        # rarer big features
     h = BASE_Y + hills * 22.0                     # ~62..84
@@ -292,6 +309,38 @@ def surface_y(wx, wz):
     if top > 122:                                 # hard safety cap (< 124 < 128)
         top = 122
     return top
+
+# ---- islands terrain (CAVEX_WORLD_TYPE=islands) ----
+@lru_cache(maxsize=None)
+def _continent(wx, wz):
+    """Large-cell continentalness field in 0..1: low = ocean, high = land."""
+    return _value_noise(wx, wz, OCEAN_CELL)
+
+def is_ocean(wx, wz):
+    """True where the islands world is open water. The spawn island (a big flat
+    disc around spawn) is always land so the player + village sit on solid ground."""
+    if max(abs(wx - SPAWN_X), abs(wz - SPAWN_Z)) <= ISLAND_SPAWN_R:
+        return False
+    return _continent(wx, wz) < OCEAN_LEVEL
+
+def islands_surface_y(wx, wz):
+    """Solid surface y for the islands world: flat land/islands just above
+    SEA_LEVEL, dug ocean basins below it (water is filled up to SEA_LEVEL in
+    build_chunk). Land stays flat + buildable; islands rise a little inland."""
+    if not is_ocean(wx, wz):
+        c = _continent(wx, wz)
+        rise = int(max(0.0, c - OCEAN_LEVEL) / max(1e-6, 1.0 - OCEAN_LEVEL) * 4.0)
+        bump = 1 if _value_noise(wx, wz, CELL) > 0.66 else 0
+        return SEA_LEVEL + 1 + rise + bump
+    c = _continent(wx, wz)
+    depth = 2 + int((OCEAN_LEVEL - c) / max(1e-6, OCEAN_LEVEL) * 7.0)
+    y = SEA_LEVEL - depth
+    return y if y > OCEAN_FLOOR_MIN else OCEAN_FLOOR_MIN
+
+def _near_ocean(wx, wz):
+    """True for a land column next to open water -> sand beach."""
+    return (is_ocean(wx + 1, wz) or is_ocean(wx - 1, wz)
+            or is_ocean(wx, wz + 1) or is_ocean(wx, wz - 1))
 
 @lru_cache(maxsize=None)
 def biome(wx, wz):
@@ -515,6 +564,87 @@ SPAWN_FEET = SPAWN_SURFACE + 1                        # top face of the surface 
 SPAWN_Y = SPAWN_FEET                                  # integer respawn cell for SpawnX/Y/Z
 SPAWN = (SPAWN_X + 0.5, SPAWN_FEET + 0.38 + EYE_HEIGHT, SPAWN_Z + 0.5)  # eye pos; feet ~0.38 above ground
 
+# ---- islands village (son's request; issue #28 MVP: buildings only, no villagers
+# yet -- villagers are a separate engine epic). A small cluster of plank houses +
+# gravel paths on a flattened pad on the spawn island, just south of spawn. ----
+VILLAGE_X, VILLAGE_Z = SPAWN_X + 6, SPAWN_Z + 18   # village centre, on the spawn island
+VILLAGE_GROUND = SEA_LEVEL + 1                     # flat build height for the whole village
+VILLAGE_R = 17                                     # village bounding half-extent (Chebyshev)
+# houses as (centre_dx, centre_dz, half_w, half_d) relative to the village centre.
+_HOUSES = [(-11, -8, 3, 2), (-2, 6, 3, 3), (9, -6, 3, 2), (7, 9, 2, 3)]
+
+def in_village(wx, wz):
+    return abs(wx - VILLAGE_X) <= VILLAGE_R and abs(wz - VILLAGE_Z) <= VILLAGE_R
+
+def _house_at(wx, wz):
+    """(house, lx, lz) if this column falls in a house footprint (incl. its walls),
+    else None. lx/lz are offsets from the house centre."""
+    for hse in _HOUSES:
+        hcx, hcz, hw, hd = hse
+        cx0, cz0 = VILLAGE_X + hcx, VILLAGE_Z + hcz
+        if abs(wx - cx0) <= hw and abs(wz - cz0) <= hd:
+            return hse, wx - cx0, wz - cz0
+    return None
+
+def village_column(blocks, base, wx, wz):
+    """Stamp a flat village column: solid ground up to VILLAGE_GROUND (no bedrock),
+    then either a gravel path, plain grass, or a small plank house (cobble floor,
+    plank walls with a south-facing door gap, flat roof). Returns the new top y.
+    Only called for in_village() columns on the islands build path."""
+    VG = VILLAGE_GROUND
+    for y in range(0, VG):
+        blocks[base + y] = STONE          # solid flat base, no bedrock
+    for y in range(VG, WORLD_HEIGHT):
+        blocks[base + y] = AIR            # clear anything above the pad
+    house = _house_at(wx, wz)
+    if house is None:
+        onpath = abs(wx - VILLAGE_X) <= 1 or abs(wz - VILLAGE_Z) <= 1
+        blocks[base + VG] = GRAVEL if onpath else GRASS
+        return VG
+    (hcx, hcz, hw, hd), lx, lz = house
+    blocks[base + VG] = COBBLE            # floor
+    perim = abs(lx) == hw or abs(lz) == hd
+    if perim:
+        door = (lz == -hd and lx == 0)    # 2-tall doorway in the south wall centre
+        for k in range(1, 4):
+            if not (door and k <= 2):
+                blocks[base + VG + k] = PLANKS
+        blocks[base + VG + 4] = PLANKS    # wall top / eave
+    else:
+        blocks[base + VG + 4] = PLANKS    # flat roof over the interior
+    return VG + 4
+
+def _is_island_tree(tx, tz):
+    """Sparse oak trees on island land, away from spawn, oceans and the village."""
+    if is_ocean(tx, tz) or in_village(tx, tz):
+        return False
+    if max(abs(tx - SPAWN_X), abs(tz - SPAWN_Z)) <= 6:
+        return False
+    return chance(tx, tz, 0, 20, 0.010)
+
+def islands_tree_blocks(wx, wz):
+    """Oak trunk/canopy cells from any tree whose 5x5 footprint covers this column,
+    each rebased on its own origin's land height (mirrors column_blocks)."""
+    extra = []
+    for dx in range(-2, 3):
+        for dz in range(-2, 3):
+            tx, tz = wx + dx, wz + dz
+            if not _is_island_tree(tx, tz):
+                continue
+            tsurf = islands_surface_y(tx, tz)
+            trunk_h = 4 + (h(tx, tz, 0, 21) % 2)
+            T = tsurf + trunk_h
+            cheb = max(abs(dx), abs(dz))
+            if dx == 0 and dz == 0:
+                extra += [(tsurf + k, LOG) for k in range(1, trunk_h + 1)]
+                extra += [(T + 1, LEAVES), (T + 2, LEAVES)]
+            else:
+                if cheb <= 2 and not (abs(dx) == 2 and abs(dz) == 2):
+                    extra += [(T - 1, LEAVES), (T, LEAVES)]
+                if cheb <= 1:
+                    extra.append((T + 1, LEAVES))
+    return extra
+
 # ---- optional rail-demo loop (issue #111; CAVEX_RAIL_DEMO=1 only) ------------
 # A fixed, flat, closed rail loop a few blocks in front of spawn so a minecart
 # placed on it rides forever (powered rails on each straight push it around) and
@@ -577,6 +707,43 @@ def build_chunk(cx, cz):
         for z in range(16):
             wx, wz = cx * 16 + x, cz * 16 + z
             base = (x * 16 + z) * WORLD_HEIGHT   # x*H*16 + z*H
+
+            # ---- islands world type: self-contained flat-land / ocean / island /
+            # village column (no bedrock, no caves/biomes/structures) ----
+            if ISLANDS:
+                water_top = -1
+                if in_village(wx, wz):
+                    top = village_column(blocks, base, wx, wz)
+                else:
+                    ocean = is_ocean(wx, wz)
+                    surf = islands_surface_y(wx, wz)
+                    for y in range(0, surf - 2):
+                        blocks[base + y] = STONE          # solid body, no bedrock
+                    beach = (not ocean) and _near_ocean(wx, wz)
+                    cover = SAND if (ocean or beach) else DIRT
+                    for y in range(max(0, surf - 2), surf):
+                        blocks[base + y] = cover
+                    blocks[base + surf] = SAND if (ocean or beach) else GRASS
+                    top = surf
+                    if ocean:
+                        for y in range(surf + 1, SEA_LEVEL + 1):
+                            blocks[base + y] = WATER
+                        water_top = SEA_LEVEL
+                    else:
+                        for (yy, bid) in islands_tree_blocks(wx, wz):
+                            if 0 <= yy < WORLD_HEIGHT:
+                                if bid == LEAVES and blocks[base + yy] != AIR:
+                                    continue
+                                blocks[base + yy] = bid
+                                top = max(top, yy)
+                hmap[z * 16 + x] = top + 1
+                sky_from = water_top if water_top >= 0 else top + 1
+                for y in range(sky_from, WORLD_HEIGHT):
+                    idx = base + y
+                    if idx & 1: skyl[idx >> 1] |= 0xF0
+                    else:       skyl[idx >> 1] |= 0x0F
+                continue
+
             surf = surface_y(wx, wz)        # per-column surface height (relief)
             depth = lake_depth(wx, wz)      # >0 only for flat basin (lake) columns
             b = biome(wx, wz)
@@ -883,6 +1050,7 @@ def main():
     decor_count = 0      # surface-decoration plant cells (flowers/grass/cacti/...)
     struct_glow = 0      # above-ground glowstone (tower beacons / hut lanterns)
     pyramid_caps = 0     # smooth-sandstone cells (only ever a pyramid apex)
+    plank_cells = 0      # PLANKS anywhere (islands: only villages use them)
     DECOR_IDS = frozenset((DANDELION, ROSE, TALLGRASS, DEADBUSH, BROWN_MUSHROOM,
                            RED_MUSHROOM, CACTUS, REED, PUMPKIN))
     for cz in range(32):
@@ -911,6 +1079,8 @@ def main():
                             struct_glow += 1
                         elif b == SMOOTH_SANDSTONE:
                             pyramid_caps += 1
+                        elif b == PLANKS:
+                            plank_cells += 1
                         if top_y < 0:
                             top_y = y
                             if y > region_max:
@@ -928,6 +1098,37 @@ def main():
                         # strata fluid pockets so the tally reflects lakes alone.
                         if b == WATER and y >= WATER_LEVEL - LAKE_MAX_DEPTH:
                             water_cells += 1
+
+    # ---- islands world type: its own self-check (flat land + oceans + islands +
+    # village + no bedrock), then done. The classic asserts below don't apply. ----
+    if ISLANDS:
+        assert heights, "no land columns found"
+        assert len(lake_cols) >= 200, \
+            f"not enough ocean ({len(lake_cols)} water-surface columns)"
+        big_ocean = _largest_connected(lake_cols)
+        assert big_ocean >= 50, f"no large connected ocean (largest pool {big_ocean})"
+        assert max(heights) - min(heights) <= 12, \
+            f"island land not flat enough (relief {max(heights) - min(heights)})"
+        assert region_max < WORLD_HEIGHT, \
+            f"a column exceeds the {WORLD_HEIGHT} cap (max y {region_max})"
+        assert plank_cells >= 20, f"no village houses (plank cells {plank_cells})"
+        sy, sb = column_top(spawn_chunk, spawn_xin, spawn_zin)
+        assert sb in (GRASS, DIRT, STONE, SAND), f"spawn not solid ground (block {sb})"
+        assert sy == SPAWN_SURFACE, f"spawn surface y {sy} != computed {SPAWN_SURFACE}"
+        sbi = spawn_chunk.find(b"Blocks") + len("Blocks") + 4
+        scol = (spawn_xin * 16 + spawn_zin) * WORLD_HEIGHT
+        assert spawn_chunk[sbi + scol + sy + 1] == AIR \
+            and spawn_chunk[sbi + scol + sy + 2] == AIR, \
+            "spawn column lacks 2 blocks of head clearance"
+        assert SPAWN_Y == sy + 1, f"SpawnY {SPAWN_Y} not just above surface {sy}"
+        spawn_blocks = spawn_chunk[sbi:sbi + COL_BLOCKS]
+        assert spawn_blocks[scol + 0] == STONE, "y=0 should be stone (no bedrock)"
+        assert BEDROCK not in spawn_blocks, "bedrock present in spawn chunk (want none)"
+        print(f"islands self-check OK: land y{min(heights)}..{max(heights)} "
+              f"({len(heights)} heights), ocean {len(lake_cols)} surface cols "
+              f"(largest pool {big_ocean}), village plank cells {plank_cells}, "
+              f"NO bedrock, spawn solid at y{sy} (SpawnY {SPAWN_Y}), region max y{region_max}")
+        return
 
     # (1) terrain is non-flat: a real spread of surface heights
     assert len(heights) >= 5, f"terrain too flat: only {len(heights)} distinct heights"
