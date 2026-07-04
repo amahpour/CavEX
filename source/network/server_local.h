@@ -25,6 +25,7 @@
 #include <stddef.h>
 
 #include "../item/inventory.h"
+#include "../platform/thread.h"
 #include "../world.h"
 #include "level_archive.h"
 #include "server_world.h"
@@ -60,9 +61,15 @@ struct server_local {
 	uint64_t world_time;
 	string_t level_name;
 	struct level_archive level;
+	// Server runs on its own thread; `stop` + join let it exit cleanly on quit so
+	// it is not still iterating `entities` while the process tears down.
+	struct thread thread;
+	volatile bool stop;
 };
 
 void server_local_create(struct server_local* s);
+// Signal the server thread to exit and join it (call on quit, before teardown).
+void server_local_stop(struct server_local* s);
 struct entity* server_local_spawn_item(vec3 pos, struct item_data* it,
 									   bool throw, struct server_local* s);
 struct entity* server_local_spawn_boat(vec3 pos, float yaw,

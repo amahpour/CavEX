@@ -644,5 +644,8 @@ int main(void) {
 		gfx_finish(true);
 	}
 
+	// Stop + join the server thread before returning, so it is not still ticking
+	// (iterating the entity dict) while the process tears down on quit.
+	server_local_stop(&server);
 	return 0;
 }

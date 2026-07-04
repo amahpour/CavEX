@@ -863,8 +863,9 @@ static void server_local_update(struct server_local* s) {
 }
 
 static void* server_local_thread(void* user) {
-	while(1) {
-		server_local_update(user);
+	struct server_local* s = user;
+	while(!s->stop) {
+		server_local_update(s);
 		thread_msleep(50);
 	}
 
@@ -885,6 +886,12 @@ void server_local_create(struct server_local* s) {
 	s->player.active_inventory = &s->player.inventory;
 	dict_entity_init(s->entities);
 
-	struct thread t;
-	thread_create(&t, server_local_thread, s, 8);
+	s->stop = false;
+	thread_create(&s->thread, server_local_thread, s, 8);
+}
+
+void server_local_stop(struct server_local* s) {
+	assert(s);
+	s->stop = true;
+	thread_join(&s->thread);
 }
