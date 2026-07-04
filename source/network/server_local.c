@@ -524,6 +524,11 @@ static void server_local_process(struct server_rpc* call, void* user) {
 								&(int8_t) {s->player.creative ? 1 : 0});
 
 			dict_entity_reset(s->entities);
+			// Villagers are never persisted and were just wiped with the entities;
+			// clear the session spawn record in lockstep so a re-loaded world
+			// re-populates from zero (issue #130).
+			s->villager_count = 0;
+			s->villager_cell_count = 0;
 			server_world_destroy(&s->world);
 			level_archive_destroy(&s->level);
 
@@ -561,6 +566,11 @@ static void server_local_process(struct server_rpc* call, void* user) {
 
 				level_archive_read(&s->level, LEVEL_TIME, &s->world_time, 0);
 				dict_entity_reset(s->entities);
+				// Reset the villager spawn record alongside the entity wipe so
+				// entering (or re-entering) a world starts from zero villagers and
+				// re-populates its villages (issue #130).
+				s->villager_count = 0;
+				s->villager_cell_count = 0;
 				s->player.active_inventory = &s->player.inventory;
 
 				clin_rpc_send(&(struct client_rpc) {
@@ -650,10 +660,13 @@ static void server_local_rail_demo_spawn(struct server_local* s) {
 
 // Scan loaded near-player chunks for the gen_world structure/village marker and
 // spawn a passive villager above each one, at most once per marker cell per
-// session (issue #129). Session-scoped is correct: entities are never persisted
-// (dict_entity_reset runs on both world load and unload), so re-spawning per
-// session is by design. The marker rides in normal chunk block data and needs no
-// save-format change.
+// session (issue #129), and never more than VILLAGER_MAX live villagers total
+// (the population cap, issue #130). Session-scoped is correct: entities are never
+// persisted (dict_entity_reset runs on both world load and unload), so
+// re-spawning per session is by design -- and the dedupe/count state now lives on
+// struct server_local so it is reset in lockstep with the entities (a revisited
+// world therefore re-populates from zero). The marker rides in normal chunk block
+// data and needs no save-format change.
 #define VILLAGER_MARKER_BLOCK_ID BLOCK_MOSSY_COBBLE // == 48, matches gen_world MOSSY
 
 // gen_world buries the marker at a structure origin (classic surf ~55..122) or a
@@ -663,18 +676,28 @@ static void server_local_rail_demo_spawn(struct server_local* s) {
 #define VILLAGER_MARKER_Y_LO 50
 #define VILLAGER_MARKER_Y_HI 123
 
-#define VILLAGER_MAX_MARKERS 64 // fixed dedupe table; plenty for the tiny window
+// Has this exact (x,z) marker cell already been populated this session? Linear
+// scan of the session record; needs a live struct so it is NOT unit-tested (the
+// pure cap+dedupe predicate villager_should_spawn is what the coverage gate
+// covers). VILLAGER_CELLS_MAX is tiny, so the scan is cheap.
+static bool server_local_cell_populated(struct server_local* s, int x, int z) {
+	for(int i = 0; i < s->villager_cell_count; i++)
+		if(s->villager_cells_x[i] == x && s->villager_cells_z[i] == z)
+			return true;
+	return false;
+}
 
 static void server_local_spawn_villagers(struct server_local* s) {
-	// Remember which marker cells we already populated this session so a marker
-	// (which persists in block data) is not re-spawned every tick. Session-static
-	// is fine: single-player has exactly one struct server_local, and the table
-	// is reset implicitly on process restart (a new session).
-	static w_coord_t done_x[VILLAGER_MAX_MARKERS];
-	static w_coord_t done_z[VILLAGER_MAX_MARKERS];
-	static int done_n = 0;
+	// The per-cell dedupe table + the running population count live on the server
+	// struct (reset alongside dict_entity_reset on world load/unload); only the
+	// arm countdown stays function-static since it just delays the first scan.
 	static int armed = 0;
 	if(++armed < 40) // ~2 s: let the near-player chunks load first
+		return;
+
+	// Cheap early-out once the session is at the population cap: no more villagers
+	// may spawn regardless of markers, so skip the whole near-player block scan.
+	if(s->villager_count >= VILLAGER_MAX)
 		return;
 
 	w_coord_t px = WCOORD_CHUNK_OFFSET((w_coord_t)floorf(s->player.x));
@@ -696,24 +719,26 @@ static void server_local_spawn_villagers(struct server_local* s) {
 					continue;
 				if(blk.type != VILLAGER_MARKER_BLOCK_ID)
 					continue;
-				// dedupe: already populated this exact (mx,mz) cell?
-				bool seen = false;
-				for(int i = 0; i < done_n; i++)
-					if(done_x[i] == mx && done_z[i] == mz) {
-						seen = true;
-						break;
-					}
-				if(seen)
+				// Consult the pure cap+dedupe predicate: refuse if we are at the
+				// population cap OR this exact (mx,mz) cell was already populated
+				// this session. Keeps the policy in one unit-tested place.
+				bool already = server_local_cell_populated(s, mx, mz);
+				if(!villager_should_spawn(s->villager_count, VILLAGER_MAX,
+										  already))
 					continue;
 				// Stand the villager ON TOP of the surface block (marker is buried
 				// one block under it), not embedded in it: marker_y + 2.
 				server_local_spawn_villager(
 					(vec3) {mx + 0.5F, (float)(y + 2), mz + 0.5F}, 0.0F, s);
-				if(done_n < VILLAGER_MAX_MARKERS) {
-					done_x[done_n] = mx;
-					done_z[done_n] = mz;
-					done_n++;
+				// Record the cell (guard the fixed bound) and bump the live count.
+				if(s->villager_cell_count < VILLAGER_CELLS_MAX) {
+					s->villager_cells_x[s->villager_cell_count] = mx;
+					s->villager_cells_z[s->villager_cell_count] = mz;
+					s->villager_cell_count++;
 				}
+				s->villager_count++;
+				if(s->villager_count >= VILLAGER_MAX)
+					return; // cap reached: stop scanning entirely
 				break; // one marker per column
 			}
 		}
@@ -885,6 +910,10 @@ void server_local_create(struct server_local* s) {
 					 INVENTORY_SIZE);
 	s->player.active_inventory = &s->player.inventory;
 	dict_entity_init(s->entities);
+
+	// Fresh session: no villagers spawned, no marker cells populated (issue #130).
+	s->villager_count = 0;
+	s->villager_cell_count = 0;
 
 	s->stop = false;
 	thread_create(&s->thread, server_local_thread, s, 8);

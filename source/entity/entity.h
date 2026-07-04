@@ -247,6 +247,14 @@ void entity_villager(uint32_t id, struct entity* e, bool server, void* world);
 void entity_villager_wander(float* yaw, vec3 vel, int turn, int forward,
 							float speed);
 
+// Pure spawn-gate decision for the villager spawner (issue #130). No engine or
+// world state, so it is unit-testable. Returns true iff another villager may be
+// spawned right now: the running population is below the cap AND this village
+// marker cell has not already been populated this session. Keeps the cap +
+// dedupe policy in one branch-coverable predicate; the server just consults it.
+bool villager_should_spawn(int current_count, int cap,
+						   bool cell_already_populated);
+
 uint32_t entity_gen_id(dict_entity_t dict);
 
 // Per-entity callback for entity_tick_all(). Invoked once for every entity in

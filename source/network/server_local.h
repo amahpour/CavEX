@@ -34,6 +34,15 @@
 #define MAX_VIEW_DISTANCE 3 // in chunks (was 5; freed ~8MB MEM1 so displaylist allocs stop failing)
 #define MAX_CHUNKS ((MAX_VIEW_DISTANCE * 2 + 2) * (MAX_VIEW_DISTANCE * 2 + 2))
 
+// Villager spawn bookkeeping (issue #130). VILLAGER_MAX is a hard cap on live
+// villagers per session so they cannot accumulate without bound as a player
+// explores many structures (the classic world has ~37; Wii MEM1 is tight).
+// VILLAGER_CELLS_MAX bounds the fixed-size table of already-populated marker
+// cells; it only needs to exceed the villages reachable within MAX_VIEW_DISTANCE
+// at once, so 64 is comfortable. Fixed-size on purpose: no heap, MEM1-friendly.
+#define VILLAGER_MAX 16
+#define VILLAGER_CELLS_MAX 64
+
 struct server_local {
 	struct random_gen rand_src;
 	struct {
@@ -61,6 +70,16 @@ struct server_local {
 	uint64_t world_time;
 	string_t level_name;
 	struct level_archive level;
+	// Session-scoped villager spawn bookkeeping (issue #130). Villagers are never
+	// persisted, so this record is reset alongside dict_entity_reset on BOTH world
+	// load and unload; a reload therefore re-populates from zero. Fixed-size on
+	// purpose (no heap, Wii-MEM1-friendly, VILLAGER_*-bounded). Plain int holds any
+	// block coordinate and matches villager_should_spawn's int parameters (the
+	// header carries no <stdint.h>, so int32_t/w_coord_t would need a new include).
+	int villager_count;						  // live villagers spawned this session
+	int villager_cell_count;				  // entries used in the arrays below
+	int villager_cells_x[VILLAGER_CELLS_MAX]; // block-x of already-populated
+	int villager_cells_z[VILLAGER_CELLS_MAX]; // village marker cells
 	// Server runs on its own thread; `stop` + join let it exit cleanly on quit so
 	// it is not still iterating `entities` while the process tears down.
 	struct thread thread;
