@@ -38,6 +38,15 @@
 		"player2_look_up": [265],
 		"player2_look_down": [264],
 		"player2_look_left": [263],
-		"player2_look_right": [262]
+		"player2_look_right": [262],
+		"player2_scroll_left": [85],
+		"player2_scroll_right": [79],
+		"player2_inventory": [80],
+		"player2_gui_up": [73],
+		"player2_gui_down": [75],
+		"player2_gui_left": [74],
+		"player2_gui_right": [76],
+		"player2_gui_click": [44],
+		"player2_gui_click_alt": [46]
 	}
 }

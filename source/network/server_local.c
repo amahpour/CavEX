@@ -34,16 +34,17 @@
 	(((x1) - (x2)) * ((x1) - (x2)) + ((z1) - (z2)) * ((z1) - (z2)))
 
 struct entity* server_local_spawn_item(vec3 pos, struct item_data* it,
-									   bool throw, struct server_local* s) {
+									   struct server_player* thrower,
+									   struct server_local* s) {
 	uint32_t entity_id = entity_gen_id(s->entities);
 	struct entity* e = dict_entity_safe_get(s->entities, entity_id);
 	entity_item(entity_id, e, true, &s->world, *it);
 	e->teleport(e, pos);
 
-	if(throw) {
-		float rx = glm_rad(-s->player.rx
+	if(thrower) {
+		float rx = glm_rad(-thrower->rx
 						   + (rand_gen_flt(&s->rand_src) - 0.5F) * 22.5F);
-		float ry = glm_rad(s->player.ry + 90.0F
+		float ry = glm_rad(thrower->ry + 90.0F
 						   + (rand_gen_flt(&s->rand_src) - 0.5F) * 22.5F);
 		e->vel[0] = sinf(rx) * sinf(ry) * 0.25F;
 		e->vel[1] = cosf(ry) * 0.25F;
@@ -153,8 +154,14 @@ void server_local_spawn_block_drops(struct server_local* s,
 			server_local_spawn_item((vec3) {blk_info->x + 0.5F,
 											blk_info->y + 0.5F,
 											blk_info->z + 0.5F},
-									items + k, false, s);
+									items + k, NULL, s);
 	}
+}
+
+uint8_t server_player_inv_window(struct server_player* sp) {
+	assert(sp && sp->server);
+	return sp == &sp->server->player2 ? WINDOWC_INVENTORY_P2 :
+										WINDOWC_INVENTORY;
 }
 
 void server_local_send_inv_changes(set_inv_slot_t changes,
@@ -191,6 +198,14 @@ struct trap_srpc_entry {
 struct trap_srpc_entry trap_srpc_ring[32];
 unsigned trap_srpc_seq = 0;
 
+// Resolve the acting local player of an RPC (issue #139). Index 1 is
+// split-screen player 2; anything else (incl. the 0 every pre-#139 sender
+// leaves) is the primary player.
+static struct server_player* acting_player(struct server_local* s,
+										   uint8_t player) {
+	return player == 1 ? &s->player2 : &s->player;
+}
+
 static void server_local_process(struct server_rpc* call, void* user) {
 	assert(call && user);
 
@@ -225,13 +240,15 @@ static void server_local_process(struct server_rpc* call, void* user) {
 	switch(call->type) {
 		case SRPC_PLAYER_POS:
 			if(call->payload.player_pos.player == 1) {
-				// Split-screen player 2: track position only, to extend chunk
-				// loading (independent exploration). No inventory/world effect.
+				// Split-screen player 2: position + view direction. Extends
+				// chunk loading and anchors P2's pickups/window drops.
 				if(s->player.finished_loading) {
-					s->player2_x = call->payload.player_pos.x;
-					s->player2_y = call->payload.player_pos.y;
-					s->player2_z = call->payload.player_pos.z;
-					s->has_pos2 = true;
+					s->player2.x = call->payload.player_pos.x;
+					s->player2.y = call->payload.player_pos.y;
+					s->player2.z = call->payload.player_pos.z;
+					s->player2.rx = call->payload.player_pos.rx;
+					s->player2.ry = call->payload.player_pos.ry;
+					s->player2.has_pos = true;
 				}
 			} else if(s->player.finished_loading) {
 				s->player.x = call->payload.player_pos.x;
@@ -242,18 +259,23 @@ static void server_local_process(struct server_rpc* call, void* user) {
 				s->player.has_pos = true;
 			}
 			break;
-		case SRPC_HOTBAR_SLOT:
+		case SRPC_HOTBAR_SLOT: {
+			struct server_player* sp
+				= acting_player(s, call->payload.hotbar_slot.player);
 			if(s->player.has_pos
 			   && call->payload.hotbar_slot.slot < INVENTORY_SIZE_HOTBAR)
-				inventory_set_hotbar(&s->player.inventory,
+				inventory_set_hotbar(&sp->inventory,
 									 call->payload.hotbar_slot.slot);
 			break;
+		}
 		case SRPC_WINDOW_CLICK: {
+			struct server_player* sp
+				= acting_player(s, call->payload.window_click.player);
 			set_inv_slot_t changes;
 			set_inv_slot_init(changes);
 
 			bool accept = inventory_action(
-				s->player.active_inventory, call->payload.window_click.slot,
+				sp->active_inventory, call->payload.window_click.slot,
 				call->payload.window_click.right_click, changes);
 
 			clin_rpc_send(&(struct client_rpc) {
@@ -265,18 +287,19 @@ static void server_local_process(struct server_rpc* call, void* user) {
 				= call->payload.window_click.window,
 			});
 
-			server_local_send_inv_changes(changes, s->player.active_inventory,
+			server_local_send_inv_changes(changes, sp->active_inventory,
 										  call->payload.window_click.window);
 			set_inv_slot_clear(changes);
 			break;
 		}
 		case SRPC_WINDOW_CLOSE: {
-			if(s->player.active_inventory->logic
-			   && s->player.active_inventory->logic->on_close)
-				s->player.active_inventory->logic->on_close(
-					s->player.active_inventory);
+			struct server_player* sp
+				= acting_player(s, call->payload.window_close.player);
+			if(sp->active_inventory->logic
+			   && sp->active_inventory->logic->on_close)
+				sp->active_inventory->logic->on_close(sp->active_inventory);
 
-			s->player.active_inventory = &s->player.inventory;
+			sp->active_inventory = &sp->inventory;
 			break;
 		}
 		case SRPC_BLOCK_DIG:
@@ -295,9 +318,11 @@ static void server_local_process(struct server_rpc* call, void* user) {
 											   .metadata = 0,
 										   });
 
+					struct server_player* sp
+						= acting_player(s, call->payload.block_dig.player);
 					struct item_data it_data;
-					bool has_tool = inventory_get_hotbar_item(
-						&s->player.inventory, &it_data);
+					bool has_tool
+						= inventory_get_hotbar_item(&sp->inventory, &it_data);
 					struct item* it = has_tool ? item_get(&it_data) : NULL;
 
 					// Creative mode: breaking a block yields no drops (mirrors
@@ -351,8 +376,17 @@ static void server_local_process(struct server_rpc* call, void* user) {
 						.z = call->payload.block_place.z,
 					};
 
+					struct server_player* sp
+						= acting_player(s, call->payload.block_place.player);
+					uint8_t inv_window = (sp == &s->player2) ?
+						WINDOWC_INVENTORY_P2 :
+						WINDOWC_INVENTORY;
+					// Block callbacks (workbench/furnace/bed/...) act on the
+					// player that clicked; they read it from s->acting.
+					s->acting = sp;
+
 					struct item_data it_data;
-					inventory_get_hotbar_item(&s->player.inventory, &it_data);
+					inventory_get_hotbar_item(&sp->inventory, &it_data);
 					struct item* it = item_get(&it_data);
 
 					if(blocks[blk_on.type]
@@ -366,39 +400,39 @@ static void server_local_process(struct server_rpc* call, void* user) {
 							  && it->onItemPlace(
 								  s, &it_data, &where, &on,
 								  call->payload.block_place.side)) {
-						size_t slot
-							= inventory_get_hotbar(&s->player.inventory);
+						size_t slot = inventory_get_hotbar(&sp->inventory);
 						// Creative mode: placing never consumes the stack.
 						if(!s->player.creative)
-							inventory_consume(&s->player.inventory,
+							inventory_consume(&sp->inventory,
 											  slot + INVENTORY_SLOT_HOTBAR);
 
 						clin_rpc_send(&(struct client_rpc) {
 							.type = CRPC_INVENTORY_SLOT,
-							.payload.inventory_slot.window = WINDOWC_INVENTORY,
+							.payload.inventory_slot.window = inv_window,
 							.payload.inventory_slot.slot
 							= slot + INVENTORY_SLOT_HOTBAR,
 							.payload.inventory_slot.item
-							= s->player.inventory
+							= sp->inventory
 								  .items[slot + INVENTORY_SLOT_HOTBAR],
 						});
 					} else if(it && it->onItemUse
 							  && it->onItemUse(s, &it_data)) {
-						size_t slot
-							= inventory_get_hotbar(&s->player.inventory);
-						inventory_consume(&s->player.inventory,
+						size_t slot = inventory_get_hotbar(&sp->inventory);
+						inventory_consume(&sp->inventory,
 										  slot + INVENTORY_SLOT_HOTBAR);
 
 						clin_rpc_send(&(struct client_rpc) {
 							.type = CRPC_INVENTORY_SLOT,
-							.payload.inventory_slot.window = WINDOWC_INVENTORY,
+							.payload.inventory_slot.window = inv_window,
 							.payload.inventory_slot.slot
 							= slot + INVENTORY_SLOT_HOTBAR,
 							.payload.inventory_slot.item
-							= s->player.inventory
+							= sp->inventory
 								  .items[slot + INVENTORY_SLOT_HOTBAR],
 						});
 					}
+
+					s->acting = &s->player;
 				}
 			}
 			break;
@@ -422,21 +456,25 @@ static void server_local_process(struct server_rpc* call, void* user) {
 			// so the client inventory mirrors it (same path normal pickups use).
 			// Gated on the creative flag here too -- a survival client could
 			// never send this, but the authority must not trust that.
+			struct server_player* sp
+				= acting_player(s, call->payload.creative_pick_block.player);
 			uint16_t id = call->payload.creative_pick_block.block_id;
 			if(s->player.has_pos && s->player.creative && id > 0 && id < 256
 			   && blocks[id] && blocks[id]->block_item.renderItem) {
-				size_t slot = inventory_get_hotbar(&s->player.inventory)
+				size_t slot = inventory_get_hotbar(&sp->inventory)
 					+ INVENTORY_SLOT_HOTBAR;
 				struct item_data stack = {
 					.id = id,
 					.durability = 0,
 					.count = blocks[id]->block_item.max_stack,
 				};
-				inventory_set_slot(&s->player.inventory, slot, stack);
+				inventory_set_slot(&sp->inventory, slot, stack);
 
 				clin_rpc_send(&(struct client_rpc) {
 					.type = CRPC_INVENTORY_SLOT,
-					.payload.inventory_slot.window = WINDOWC_INVENTORY,
+					.payload.inventory_slot.window = (sp == &s->player2) ?
+						WINDOWC_INVENTORY_P2 :
+						WINDOWC_INVENTORY,
 					.payload.inventory_slot.slot = slot,
 					.payload.inventory_slot.item = stack,
 				});
@@ -453,6 +491,8 @@ static void server_local_process(struct server_rpc* call, void* user) {
 			// valid (blocks AND items), so the grid can offer the whole set.
 			// Gated on creative: a survival client could never send this, but the
 			// authority must not trust that.
+			struct server_player* spc
+				= acting_player(s, call->payload.creative_set_picked.player);
 			if(s->player.has_pos && s->player.creative) {
 				uint16_t id = call->payload.creative_set_picked.item_id;
 				struct item_data picked
@@ -462,11 +502,13 @@ static void server_local_process(struct server_rpc* call, void* user) {
 					picked.id = id;
 					picked.count = items[id]->max_stack;
 				}
-				inventory_set_picked_item(&s->player.inventory, picked);
+				inventory_set_picked_item(&spc->inventory, picked);
 
 				clin_rpc_send(&(struct client_rpc) {
 					.type = CRPC_INVENTORY_SLOT,
-					.payload.inventory_slot.window = WINDOWC_INVENTORY,
+					.payload.inventory_slot.window = (spc == &s->player2) ?
+						WINDOWC_INVENTORY_P2 :
+						WINDOWC_INVENTORY,
 					.payload.inventory_slot.slot = SPECIAL_SLOT_PICKED_ITEM,
 					.payload.inventory_slot.item = picked,
 				});
@@ -496,8 +538,10 @@ static void server_local_process(struct server_rpc* call, void* user) {
 					// and reachable (craft motor -> select -> ride). A boat ridden
 					// without the motor selected stays exactly the #34 boat.
 					struct item_data held;
+					struct server_player* rider = acting_player(
+						s, call->payload.boat_control.player);
 					e->data.boat.powered
-						= inventory_get_hotbar_item(&s->player.inventory, &held)
+						= inventory_get_hotbar_item(&rider->inventory, &held)
 						&& held.id == ITEM_MOTOR;
 				}
 			}
@@ -516,6 +560,17 @@ static void server_local_process(struct server_rpc* call, void* user) {
 				(vec2) {s->player.rx, s->player.ry}, NULL, s->player.dimension);
 
 			level_archive_write_inventory(&s->level, &s->player.inventory);
+			// Split-screen player 2's inventory lives in a player2.dat sidecar
+			// next to level.dat (issue #139); written even if it was never
+			// used this session (an all-empty list is valid).
+			{
+				struct level_archive la2;
+				if(level_archive_create_player_file(&la2, s->level_name,
+													"player2.dat")) {
+					level_archive_write_inventory(&la2, &s->player2.inventory);
+					level_archive_destroy(&la2);
+				}
+			}
 			level_archive_write(&s->level, LEVEL_TIME, &s->world_time);
 			// Persist the game mode (best-effort: only succeeds if the save
 			// already carries a gameMode tag — true for any world generated by
@@ -529,6 +584,9 @@ static void server_local_process(struct server_rpc* call, void* user) {
 
 			s->player.has_pos = false;
 			s->player.finished_loading = false;
+			s->player2.has_pos = false;
+			inventory_clear(&s->player2.inventory);
+			s->player2.active_inventory = &s->player2.inventory;
 			string_reset(s->level_name);
 			break;
 		case SRPC_LOAD_WORLD:
@@ -562,6 +620,21 @@ static void server_local_process(struct server_rpc* call, void* user) {
 				level_archive_read(&s->level, LEVEL_TIME, &s->world_time, 0);
 				dict_entity_reset(s->entities);
 				s->player.active_inventory = &s->player.inventory;
+
+				// Split-screen player 2: inventory from the player2.dat
+				// sidecar (missing/legacy world -> stays empty).
+				inventory_clear(&s->player2.inventory);
+				s->player2.active_inventory = &s->player2.inventory;
+				s->player2.has_pos = false;
+				{
+					struct level_archive la2;
+					if(level_archive_create_player_file(&la2, s->level_name,
+														"player2.dat")) {
+						level_archive_read_inventory(&la2,
+													 &s->player2.inventory);
+						level_archive_destroy(&la2);
+					}
+				}
 
 				clin_rpc_send(&(struct client_rpc) {
 					.type = CRPC_WORLD_RESET,
@@ -762,9 +835,9 @@ static void server_local_update(struct server_local* s) {
 	// union of both players' view squares so they can roam apart. has_pos2 is
 	// false in single-player, so px2/pz2 collapse to player 1 and every call
 	// below is identical to the original single-player behaviour.
-	bool p2 = s->has_pos2;
-	w_coord_t px2 = p2 ? WCOORD_CHUNK_OFFSET(floor(s->player2_x)) : px;
-	w_coord_t pz2 = p2 ? WCOORD_CHUNK_OFFSET(floor(s->player2_z)) : pz;
+	bool p2 = s->player2.has_pos;
+	w_coord_t px2 = p2 ? WCOORD_CHUNK_OFFSET(floor(s->player2.x)) : px;
+	w_coord_t pz2 = p2 ? WCOORD_CHUNK_OFFSET(floor(s->player2.z)) : pz;
 
 	server_world_random_tick(&s->world, &s->rand_src, s, px, pz,
 							 MAX_VIEW_DISTANCE - 2);
@@ -858,6 +931,21 @@ static void server_local_update(struct server_local* s) {
 			}
 		}
 
+		// Mirror player 2's loaded inventory. In single-player the client has
+		// no window 3 container and drops these on the floor (handler guards
+		// on gstate.windows[window]).
+		for(size_t k = 0; k < INVENTORY_SIZE; k++) {
+			if(s->player2.inventory.items[k].id > 0) {
+				clin_rpc_send(&(struct client_rpc) {
+					.type = CRPC_INVENTORY_SLOT,
+					.payload.inventory_slot.window = WINDOWC_INVENTORY_P2,
+					.payload.inventory_slot.slot = k,
+					.payload.inventory_slot.item
+					= s->player2.inventory.items[k],
+				});
+			}
+		}
+
 		s->player.finished_loading = true;
 	}
 }
@@ -876,14 +964,23 @@ void server_local_create(struct server_local* s) {
 	assert(s);
 	rand_gen_seed(&s->rand_src);
 	s->world_time = 0;
+	s->player.server = s;
 	s->player.has_pos = false;
 	s->player.finished_loading = false;
 	s->player.creative = false; // survival until a save says otherwise
+	s->player2.server = s;
+	s->player2.has_pos = false;
+	s->player2.finished_loading = false;
+	s->player2.creative = false;
+	s->acting = &s->player;
 	string_init(s->level_name);
 
-	inventory_create(&s->player.inventory, &inventory_logic_player, s,
-					 INVENTORY_SIZE);
+	inventory_create(&s->player.inventory, &inventory_logic_player,
+					 &s->player, INVENTORY_SIZE);
 	s->player.active_inventory = &s->player.inventory;
+	inventory_create(&s->player2.inventory, &inventory_logic_player,
+					 &s->player2, INVENTORY_SIZE);
+	s->player2.active_inventory = &s->player2.inventory;
 	dict_entity_init(s->entities);
 
 	s->stop = false;

@@ -67,8 +67,10 @@ void screen_ingame_render3D(struct screen* s, mat4 view) {
 	}
 
 	float place_lerp = 0.0F;
-	size_t slot = inventory_get_hotbar(
-		windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]));
+	// the swapped-in ACTIVE player's own container (issue #139)
+	struct inventory* inv
+		= windowc_get_latest(mp_player_windowc(gstate.mp_active));
+	size_t slot = inventory_get_hotbar(inv);
 
 	float dig_lerp
 		= time_diff_s(gstate.held_item_animation.punch.start, time_get())
@@ -104,8 +106,7 @@ void screen_ingame_render3D(struct screen* s, mat4 view) {
 	mat4 model;
 	struct item_data item;
 
-	if(inventory_get_slot(windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]),
-						  slot + INVENTORY_SLOT_HOTBAR, &item)
+	if(inventory_get_slot(inv, slot + INVENTORY_SLOT_HOTBAR, &item)
 	   && item_get(&item)) {
 		glm_translate_make(model,
 						   (vec3) {0.56F - sinf(sqrtLerpPI) * 0.4F,
@@ -162,6 +163,8 @@ void screen_ingame_render3D(struct screen* s, mat4 view) {
 // swaps player 2 into those fields before calling with device 1. The inventory /
 // hotbar is shared between local players in this milestone (Scope A).
 static void ingame_interact(int device) {
+	struct inventory* inv = windowc_get_latest(mp_player_windowc(device));
+
 	// While riding a boat the player steers instead of interacting with the
 	// world (issue #34): suppress block place/dig so a board/steer tap never
 	// also places or mines a block. This is also what keeps the board tap from
@@ -181,10 +184,10 @@ static void ingame_interact(int device) {
 			.payload.block_place.y = gstate.camera_hit.y,
 			.payload.block_place.z = gstate.camera_hit.z,
 			.payload.block_place.side = gstate.camera_hit.side,
+			.payload.block_place.player = device,
 		});
 
-		if(inventory_get_hotbar_item(
-			   windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), NULL)) {
+		if(inventory_get_hotbar_item(inv, NULL)) {
 			gstate.held_item_animation.punch.start = time_get();
 			gstate.held_item_animation.punch.place = true;
 		}
@@ -199,8 +202,7 @@ static void ingame_interact(int device) {
 			= world_get_block(&gstate.world, gstate.digging.x, gstate.digging.y,
 							  gstate.digging.z);
 		struct item_data it;
-		inventory_get_hotbar_item(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), &it);
+		inventory_get_hotbar_item(inv, &it);
 		int delay = blocks[blk.type] ?
 			tool_dig_delay_ms(blocks[blk.type], item_get(&it), creative) :
 			0;
@@ -220,6 +222,7 @@ static void ingame_interact(int device) {
 				.payload.block_dig.z = gstate.digging.z,
 				.payload.block_dig.side = gstate.camera_hit.side,
 				.payload.block_dig.finished = false,
+				.payload.block_dig.player = device,
 			});
 		}
 
@@ -245,6 +248,7 @@ static void ingame_interact(int device) {
 					.payload.block_dig.z = gstate.digging.z,
 					.payload.block_dig.side = gstate.camera_hit.side,
 					.payload.block_dig.finished = true,
+					.payload.block_dig.player = device,
 				});
 
 				gstate.digging.cooldown = time_get();
@@ -261,6 +265,7 @@ static void ingame_interact(int device) {
 				.payload.block_dig.z = gstate.digging.z,
 				.payload.block_dig.side = gstate.camera_hit.side,
 				.payload.block_dig.finished = true,
+				.payload.block_dig.player = device,
 			});
 
 			gstate.digging.cooldown = time_get();
@@ -285,8 +290,48 @@ static void ingame_interact(int device) {
 				.payload.block_dig.z = gstate.digging.z,
 				.payload.block_dig.side = gstate.camera_hit.side,
 				.payload.block_dig.finished = false,
+				.payload.block_dig.player = device,
 			});
 		}
+	}
+
+	// Hotbar scroll for THIS player (issue #139): own keys (device), own
+	// container, own switch animation (the caller swapped the active player's
+	// anim state into the canonical field).
+	size_t cur_slot = inventory_get_hotbar(inv);
+	bool old_item_exists = inventory_get_hotbar_item(inv, NULL);
+	bool scrolled_left = input_pressed_dev(IB_SCROLL_LEFT, device);
+	bool scrolled_right = input_pressed_dev(IB_SCROLL_RIGHT, device);
+
+	if(scrolled_left || scrolled_right) {
+		size_t next_slot;
+		if(scrolled_left)
+			next_slot = (cur_slot == 0) ? INVENTORY_SIZE_HOTBAR - 1 :
+										  cur_slot - 1;
+		else
+			next_slot = (cur_slot == INVENTORY_SIZE_HOTBAR - 1) ?
+				0 :
+				cur_slot + 1;
+
+		inventory_set_hotbar(inv, next_slot);
+		bool new_item_exists = inventory_get_hotbar_item(inv, NULL);
+
+		if(time_diff_s(gstate.held_item_animation.switch_item.start,
+					   time_get())
+			   >= 0.15F
+		   && (old_item_exists || new_item_exists)) {
+			gstate.held_item_animation.switch_item.start = time_get();
+			gstate.held_item_animation.switch_item.old_slot = cur_slot;
+		}
+
+		if(gstate.digging.active)
+			gstate.digging.start = time_get();
+
+		svin_rpc_send(&(struct server_rpc) {
+			.type = SRPC_HOTBAR_SLOT,
+			.payload.hotbar_slot.slot = next_slot,
+			.payload.hotbar_slot.player = device,
+		});
 	}
 
 	if(input_held_dev(IB_ACTION1, device)
@@ -336,59 +381,7 @@ static void screen_ingame_update(struct screen* s, float dt) {
 		mp_swap_active_view();
 	}
 
-	// The remainder is player-1 only: hotbar scroll, menu, inventory, map. Player 2
-	// has no scroll/menu bindings in this milestone and the inventory is shared.
-	size_t slot = inventory_get_hotbar(
-		windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]));
-	bool old_item_exists = inventory_get_hotbar_item(
-		windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), NULL);
-
-	if(input_pressed(IB_SCROLL_LEFT)) {
-		size_t next_slot = (slot == 0) ? INVENTORY_SIZE_HOTBAR - 1 : slot - 1;
-		inventory_set_hotbar(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), next_slot);
-		bool new_item_exists = inventory_get_hotbar_item(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), NULL);
-
-		if(time_diff_s(gstate.held_item_animation.switch_item.start, time_get())
-			   >= 0.15F
-		   && (old_item_exists || new_item_exists)) {
-			gstate.held_item_animation.switch_item.start = time_get();
-			gstate.held_item_animation.switch_item.old_slot = slot;
-		}
-
-		if(gstate.digging.active)
-			gstate.digging.start = time_get();
-
-		svin_rpc_send(&(struct server_rpc) {
-			.type = SRPC_HOTBAR_SLOT,
-			.payload.hotbar_slot.slot = next_slot,
-		});
-	}
-
-	if(input_pressed(IB_SCROLL_RIGHT)) {
-		size_t next_slot = (slot == INVENTORY_SIZE_HOTBAR - 1) ? 0 : slot + 1;
-		inventory_set_hotbar(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), next_slot);
-		bool new_item_exists = inventory_get_hotbar_item(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), NULL);
-
-		if(time_diff_s(gstate.held_item_animation.switch_item.start, time_get())
-			   >= 0.15F
-		   && (old_item_exists || new_item_exists)) {
-			gstate.held_item_animation.switch_item.start = time_get();
-			gstate.held_item_animation.switch_item.old_slot = slot;
-		}
-
-		if(gstate.digging.active)
-			gstate.digging.start = time_get();
-
-		svin_rpc_send(&(struct server_rpc) {
-			.type = SRPC_HOTBAR_SLOT,
-			.payload.hotbar_slot.slot = next_slot,
-		});
-	}
-
+	// World-level buttons stay player-1: save&quit, creative toggle, map.
 	if(input_pressed(IB_HOME)) {
 		screen_set(&screen_select_world);
 		svin_rpc_send(&(struct server_rpc) {
@@ -404,17 +397,30 @@ static void screen_ingame_update(struct screen* s, float dt) {
 			.payload.set_gamemode.toggle = true,
 		});
 
-	if(input_pressed(IB_INVENTORY))
-		// Both modes open the SAME survival inventory screen so creative is "the
-		// same as when you hit the inventory button"; in creative that screen
-		// adds a paged all-items grab strip above the GUI (screen_inventory.c).
+	// Both modes open the SAME survival inventory screen so creative is "the
+	// same as when you hit the inventory button"; in creative that screen
+	// adds a paged all-items grab strip above the GUI (screen_inventory.c).
+	// Each local player opens their OWN inventory on their own key (issue
+	// #139); the screen takes over the whole display (couch co-op) but edits
+	// only the opener's items and reads the opener's device.
+	if(input_pressed(IB_INVENTORY)) {
+		screen_inventory_set_owner(0);
 		screen_set(&screen_inventory);
+	} else if(gstate.num_local_players >= 2
+			  && input_pressed_dev(IB_INVENTORY, 1)) {
+		screen_inventory_set_owner(1);
+		screen_set(&screen_inventory);
+	}
 
 	if(input_pressed(IB_MAP))
 		screen_set(&screen_map);
 }
 
 static void screen_ingame_render2D(struct screen* s, int width, int height) {
+	// the swapped-in ACTIVE player's own container (issue #139): each half's
+	// hotbar, selection and icons show that player's items
+	struct inventory* inv
+		= windowc_get_latest(mp_player_windowc(gstate.mp_active));
 	char str[64];
 	sprintf(str, GAME_NAME " Alpha %i.%i.%i (impl. B1.7.3)", VERSION_MAJOR,
 			VERSION_MINOR, VERSION_PATCH);
@@ -455,8 +461,7 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 			= world_get_block(&gstate.world, gstate.digging.x,
 							  gstate.digging.y, gstate.digging.z);
 		struct item_data dit;
-		inventory_get_hotbar_item(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), &dit);
+		inventory_get_hotbar_item(inv, &dit);
 		bool dcreative = gstate.local_player
 			&& gstate.local_player->data.local_player.creative;
 		int ddelay = blocks[dblk.type] ?
@@ -511,9 +516,7 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 							  gstate.camera_hit.y, gstate.camera_hit.z);
 		if(blocks[bd.type] && blocks[bd.type]->onRightClick) {
 			icon_offset += gutil_control_icon(icon_offset, IB_ACTION2, "Use");
-		} else if(inventory_get_hotbar_item(
-					  windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]),
-					  &item)
+		} else if(inventory_get_hotbar_item(inv, &item)
 				  && item_get(&item)) {
 			icon_offset
 				+= gutil_control_icon(icon_offset, IB_ACTION2,
@@ -540,9 +543,7 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 
 	for(int k = 0; k < INVENTORY_SIZE_HOTBAR; k++) {
 		struct item_data item;
-		if(inventory_get_slot(
-			   windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]),
-			   k + INVENTORY_SLOT_HOTBAR, &item))
+		if(inventory_get_slot(inv, k + INVENTORY_SLOT_HOTBAR, &item))
 			gutil_draw_item(&item, (width - 182 * 2) / 2 + 3 * 2 + 20 * 2 * k,
 							height - 32 * 8 / 5 - 19 * 2, 0);
 	}
@@ -552,9 +553,7 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 
 	// draw hotbar selection
 	gutil_texquad((width - 182 * 2) / 2 - 2
-					  + 20 * 2
-						  * inventory_get_hotbar(windowc_get_latest(
-							  gstate.windows[WINDOWC_INVENTORY])),
+					  + 20 * 2 * inventory_get_hotbar(inv),
 				  height - 32 * 8 / 5 - 23 * 2, 208, 0, 24, 24, 24 * 2, 24 * 2);
 
 	// The hearts are purely cosmetic (CavEX has no health system). In creative

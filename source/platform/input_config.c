@@ -25,8 +25,9 @@
 // device 0 is the original single-player binding set ("input.player_*"); device 1
 // is the local split-screen second player ("input.player2_*"). Buttons a device
 // does not use return NULL, and the caller treats NULL as "unbound" (always
-// false). Player 2 intentionally has no menu/GUI/screenshot bindings in this
-// milestone -- those stay player-1 only so a shared keyboard cannot collide.
+// false). Player 2 has its own inventory/GUI keys (issue #139) so it can drive
+// its own screens; world-level buttons (save&quit, map, creative toggle,
+// screenshot) stay player-1 only so a shared keyboard cannot collide.
 
 #include <stddef.h>
 
@@ -84,6 +85,14 @@ const char* input_config_key(enum input_button b, int device) {
 		case IB_LOOK_RIGHT: return "input.player2_look_right";
 		case IB_SCROLL_LEFT: return "input.player2_scroll_left";
 		case IB_SCROLL_RIGHT: return "input.player2_scroll_right";
+		// Player 2 drives its own inventory / window screens (issue #139).
+		case IB_INVENTORY: return "input.player2_inventory";
+		case IB_GUI_UP: return "input.player2_gui_up";
+		case IB_GUI_DOWN: return "input.player2_gui_down";
+		case IB_GUI_LEFT: return "input.player2_gui_left";
+		case IB_GUI_RIGHT: return "input.player2_gui_right";
+		case IB_GUI_CLICK: return "input.player2_gui_click";
+		case IB_GUI_CLICK_ALT: return "input.player2_gui_click_alt";
 		default: return NULL;
 	}
 }

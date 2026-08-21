@@ -44,5 +44,10 @@ void screen_set(struct screen* s);
 
 void screen_crafting_set_windowc(uint8_t container);
 void screen_furnace_set_windowc(uint8_t container);
+// Which local player opened the window / owns the screen (issue #139): its
+// GUI reads that player's input device and its clicks act on that player.
+void screen_crafting_set_owner(uint8_t player);
+void screen_furnace_set_owner(uint8_t player);
+void screen_inventory_set_owner(uint8_t player);
 
 #endif

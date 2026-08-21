@@ -21,6 +21,30 @@
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
+// Pure nearest-player pick for item collection — see inventory_logic.h.
+int pickup_nearest_player(bool has0, double x0, double y0, double z0,
+						  bool has1, double x1, double y1, double z1,
+						  double ix, double iy, double iz, double reach) {
+	double r2 = reach * reach;
+	double d0 = r2 + 1.0, d1 = r2 + 1.0;
+
+	if(has0) {
+		double dx = ix - x0, dy = iy - y0, dz = iz - z0;
+		d0 = dx * dx + dy * dy + dz * dz;
+	}
+
+	if(has1) {
+		double dx = ix - x1, dy = iy - y1, dz = iz - z1;
+		d1 = dx * dx + dy * dy + dz * dz;
+	}
+
+	if(d0 <= r2 && (d0 <= d1 || d1 > r2))
+		return 0;
+	if(d1 <= r2)
+		return 1;
+	return -1;
+}
+
 bool inventory_collect(struct inventory* inv, struct item_data* item,
 					   uint8_t* slot_priority, size_t slot_length,
 					   set_inv_slot_t changes) {

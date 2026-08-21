@@ -54,26 +54,35 @@ struct server_rpc {
 		struct {
 			string_t name;
 		} load_world;
+		// The RPCs below carry the ACTING local player index (issue #139):
+		// 0 = player 1 (the only player in single-player; existing senders
+		// leave it zero so single-player is byte-identical), 1 = split-screen
+		// player 2. The server routes the action to that player's inventory.
 		struct {
 			w_coord_t x, y, z;
 			enum side side;
+			uint8_t player;
 		} block_place;
 		struct {
 			bool finished;
 			w_coord_t x, y, z;
 			enum side side;
+			uint8_t player;
 		} block_dig;
 		struct {
 			size_t slot;
+			uint8_t player;
 		} hotbar_slot;
 		struct {
 			uint8_t window;
 			uint8_t slot;
 			bool right_click;
 			uint16_t action_id;
+			uint8_t player;
 		} window_click;
 		struct {
 			uint8_t window;
+			uint8_t player;
 		} window_close;
 		struct {
 			// true  -> toggle the server's creative flag (echoed back via
@@ -86,6 +95,7 @@ struct server_rpc {
 			// the currently selected hotbar slot. Honoured only while the
 			// server's creative flag is set.
 			uint16_t block_id;
+			uint8_t player;
 		} creative_pick_block;
 		struct {
 			// Item id the survival-style creative grid wants a full,
@@ -96,6 +106,7 @@ struct server_rpc {
 			// blocks. The existing window-click path then moves it between the
 			// player's real slots exactly like the survival inventory.
 			uint16_t item_id;
+			uint8_t player;
 		} creative_set_picked;
 		struct {
 			// Server-authoritative boat control, sent each tick by the riding
@@ -104,6 +115,7 @@ struct server_rpc {
 			int forward;
 			int turn;
 			bool dismount;
+			uint8_t player; // rider (motor check reads this player's hotbar)
 		} boat_control;
 	} payload;
 };
