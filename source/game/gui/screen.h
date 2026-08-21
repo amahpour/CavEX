@@ -30,6 +30,11 @@ struct screen {
 	void (*render2D)(struct screen* s, int width, int height);
 	void (*render3D)(struct screen* s, mat4 view);
 	bool render_world;
+	// Split-screen: draw render2D once over the FULL screen after the per-view
+	// loop instead of once per half. For modal GUIs (inventory/crafting/
+	// furnace) whose update() hit-tests under the full viewport — and whose
+	// 334-unit-tall layout cannot fit a 240-unit Wii half.
+	bool render2D_fullscreen;
 };
 
 extern struct screen screen_ingame;

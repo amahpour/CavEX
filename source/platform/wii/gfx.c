@@ -26,6 +26,7 @@
 #include "../../graphics/texture_atlas.h"
 #include "../../util.h"
 #include "../gfx.h"
+#include "../input.h"
 #include "../texture.h"
 
 #define FIFO_SIZE (256 * 1024)
@@ -46,6 +47,21 @@ static uint32_t gfx_depth_test_last = GX_TRUE;
 static uint32_t gfx_depth_func_last = GX_LEQUAL;
 
 static int gfx_screen_width = 802;
+
+// Active viewport in gfx units (gfx_screen_width x 480), tracked like the PC
+// backend so split-screen halves report their own size through gfx_width()/
+// gfx_height() (issue #140). GX itself works in EFB pixels (fbWidth x
+// efbHeight, <= 640x528), so every GX_SetViewport/Scissor call below maps
+// through vp_to_efb_*. Full-screen until the split renderer narrows it.
+static int vp_x = 0, vp_y = 0, vp_w = 802, vp_h = 480;
+
+static float vp_to_efb_x(int x) {
+	return (float)x * (float)screenMode->fbWidth / (float)gfx_screen_width;
+}
+
+static float vp_to_efb_y(int y) {
+	return (float)y * (float)screenMode->efbHeight / 480.0F;
+}
 
 /*static void* thread_vsync(void* user) {
 	void* current_frame = NULL;
@@ -85,11 +101,11 @@ static void copy_buffers(u32 cnt) {
 }
 
 int gfx_width() {
-	return gfx_screen_width;
+	return vp_w;
 }
 
 int gfx_height() {
-	return 480;
+	return vp_h;
 }
 
 int gfx_window_width() {
@@ -100,18 +116,21 @@ int gfx_window_height() {
 	return 480;
 }
 
-// Local split-screen (issue #23) is PC-only; Wii 2-player is out of scope. These
-// exist for link-compatibility with the shared gfx API and are never called on
-// the single-player Wii path (main.c only narrows the viewport when there are two
-// local players), so single-player rendering is unchanged.
+// Local split-screen viewports (issues #23/#140). Callers pass gfx units;
+// the GX calls get EFB pixels. gfx_width()/gfx_height() then report the
+// active half so the 2D ortho, camera aspect and HUD adapt with no
+// per-callsite changes — same contract as the PC backend.
 void gfx_viewport(int x, int y, int width, int height) {
-	GX_SetViewport(x, y, width, height, 0, 1);
-	GX_SetScissor(x, y, width, height);
+	vp_x = x;
+	vp_y = y;
+	vp_w = width;
+	vp_h = height;
+	GX_SetViewport(vp_to_efb_x(x), vp_to_efb_y(y), vp_to_efb_x(width),
+				   vp_to_efb_y(height), 0, 1);
 }
 
 void gfx_viewport_full(void) {
-	GX_SetViewport(0, 0, gfx_screen_width, 480, 0, 1);
-	GX_SetScissor(0, 0, gfx_screen_width, 480);
+	gfx_viewport(0, 0, gfx_screen_width, 480);
 }
 
 void gfx_setup() {
@@ -135,6 +154,11 @@ void gfx_setup() {
 		screenMode->viWidth = 672;
 		gfx_screen_width = 640;
 	}
+	vp_w = gfx_screen_width;
+	vp_h = 480;
+	// input_init ran before gfx_setup and latched the 802-wide default; on a
+	// 4:3 console the IR must scale to 640 gfx units instead (issue #140).
+	input_ir_vres_update();
 
 	if(VIDEO_GetCurrentTvMode() == VI_PAL
 	   || VIDEO_GetCurrentTvMode() == VI_MPAL) {
@@ -461,7 +485,11 @@ void gfx_write_buffers(bool color, bool depth, bool depth_test) {
 }
 
 void gfx_depth_range(float near, float far) {
-	GX_SetViewport(0, 0, screenMode->fbWidth, screenMode->efbHeight, near, far);
+	// Re-issue the ACTIVE viewport (not the full screen) with the new depth
+	// window, or the held-item/GUI-layer renders would silently reset a
+	// split-screen half back to full screen (issue #140).
+	GX_SetViewport(vp_to_efb_x(vp_x), vp_to_efb_y(vp_y), vp_to_efb_x(vp_w),
+				   vp_to_efb_y(vp_h), near, far);
 }
 
 void gfx_depth_func(enum depth_func func) {
@@ -504,7 +532,8 @@ void gfx_cull_func(enum cull_func func) {
 void gfx_scissor(bool enable, uint32_t x, uint32_t y, uint32_t width,
 				 uint32_t height) {
 	if(enable) {
-		GX_SetScissor(x, y, width, height);
+		GX_SetScissor(vp_to_efb_x(x), vp_to_efb_y(y), vp_to_efb_x(width),
+					  vp_to_efb_y(height));
 	} else {
 		GX_SetScissor(0, 0, 0x3FF, 0x3FF);
 	}

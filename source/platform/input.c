@@ -154,87 +154,110 @@ void input_native_joystick(float dt, float* dx, float* dy) {
 	}
 }
 
+// PC: one keyboard/mouse — devices are told apart by their config key set
+// (player2_*), so the native layer ignores the device index. The _dev shape
+// exists so the shared query code below can route the WPAD channel on Wii.
+static void input_native_key_status_dev(int key, int device, bool* pressed,
+										bool* released, bool* held) {
+	(void)device;
+	input_native_key_status(key, pressed, released, held);
+}
+
 #endif
 
 #ifdef PLATFORM_WII
 
 #include <wiiuse/wpad.h>
 
+// Per-CHANNEL Wiimote state (issue #140): channel 0 drives local player 1,
+// channel 1 drives split-screen player 2. Both read the SAME config bindings;
+// the device index selects the WPAD channel instead of a key-name set.
+#define WPAD_LOCAL_CHANNELS 2
+
 static struct {
 	float dx, dy;
 	float magnitude;
 	bool available;
-} joystick_input[3];
+} joystick_input[WPAD_LOCAL_CHANNELS][3];
 
-static bool js_emulated_btns_prev[3][4];
-static bool js_emulated_btns_held[3][4];
+static bool js_emulated_btns_prev[WPAD_LOCAL_CHANNELS][3][4];
+static bool js_emulated_btns_held[WPAD_LOCAL_CHANNELS][3][4];
 
 void input_init() {
 	WPAD_Init();
-	WPAD_SetDataFormat(WPAD_CHAN_0, WPAD_FMT_BTNS_ACC_IR);
-	WPAD_SetVRes(WPAD_CHAN_0, gfx_width(), gfx_height());
-
-	for(int k = 0; k < 4; k++) {
-		for(int j = 0; j < 3; j++)
-			js_emulated_btns_prev[j][k] = js_emulated_btns_held[j][k] = false;
+	for(int ch = 0; ch < WPAD_LOCAL_CHANNELS; ch++) {
+		WPAD_SetDataFormat(ch, WPAD_FMT_BTNS_ACC_IR);
+		WPAD_SetVRes(ch, gfx_window_width(), gfx_window_height());
 	}
+
+	for(int ch = 0; ch < WPAD_LOCAL_CHANNELS; ch++)
+		for(int k = 0; k < 4; k++)
+			for(int j = 0; j < 3; j++)
+				js_emulated_btns_prev[ch][j][k]
+					= js_emulated_btns_held[ch][j][k] = false;
 }
 
 void input_poll() {
 	WPAD_ScanPads();
 
-	expansion_t e;
-	WPAD_Expansion(WPAD_CHAN_0, &e);
+	for(int ch = 0; ch < WPAD_LOCAL_CHANNELS; ch++) {
+		expansion_t e;
+		WPAD_Expansion(ch, &e);
 
-	if(e.type == WPAD_EXP_NUNCHUK) {
-		joystick_input[0].dx = sin(glm_rad(e.nunchuk.js.ang));
-		joystick_input[0].dy = cos(glm_rad(e.nunchuk.js.ang));
-		joystick_input[0].magnitude = e.nunchuk.js.mag;
-		joystick_input[0].available = true;
-	} else {
-		joystick_input[0].available = false;
-	}
-
-	if(e.type == WPAD_EXP_CLASSIC) {
-		joystick_input[1].dx = sin(glm_rad(e.classic.ljs.ang));
-		joystick_input[1].dy = cos(glm_rad(e.classic.ljs.ang));
-		joystick_input[1].magnitude = e.classic.ljs.mag;
-		joystick_input[1].available = true;
-
-		joystick_input[2].dx = sin(glm_rad(e.classic.rjs.ang));
-		joystick_input[2].dy = cos(glm_rad(e.classic.rjs.ang));
-		joystick_input[2].magnitude = e.classic.rjs.mag;
-		joystick_input[2].available = true;
-	} else {
-		joystick_input[1].available = joystick_input[2].available = false;
-	}
-
-	for(int j = 0; j < 3; j++) {
-		for(int k = 0; k < 4; k++) {
-			js_emulated_btns_prev[j][k] = js_emulated_btns_held[j][k];
-			js_emulated_btns_held[j][k] = false;
+		if(e.type == WPAD_EXP_NUNCHUK) {
+			joystick_input[ch][0].dx = sin(glm_rad(e.nunchuk.js.ang));
+			joystick_input[ch][0].dy = cos(glm_rad(e.nunchuk.js.ang));
+			joystick_input[ch][0].magnitude = e.nunchuk.js.mag;
+			joystick_input[ch][0].available = true;
+		} else {
+			joystick_input[ch][0].available = false;
 		}
 
-		if(joystick_input[j].available) {
-			float x = joystick_input[j].dx * joystick_input[j].magnitude;
-			float y = joystick_input[j].dy * joystick_input[j].magnitude;
+		if(e.type == WPAD_EXP_CLASSIC) {
+			joystick_input[ch][1].dx = sin(glm_rad(e.classic.ljs.ang));
+			joystick_input[ch][1].dy = cos(glm_rad(e.classic.ljs.ang));
+			joystick_input[ch][1].magnitude = e.classic.ljs.mag;
+			joystick_input[ch][1].available = true;
 
-			if(x > 0.2F) {
-				js_emulated_btns_held[j][3] = true;
-			} else if(x < -0.2F) {
-				js_emulated_btns_held[j][2] = true;
+			joystick_input[ch][2].dx = sin(glm_rad(e.classic.rjs.ang));
+			joystick_input[ch][2].dy = cos(glm_rad(e.classic.rjs.ang));
+			joystick_input[ch][2].magnitude = e.classic.rjs.mag;
+			joystick_input[ch][2].available = true;
+		} else {
+			joystick_input[ch][1].available = joystick_input[ch][2].available
+				= false;
+		}
+
+		for(int j = 0; j < 3; j++) {
+			for(int k = 0; k < 4; k++) {
+				js_emulated_btns_prev[ch][j][k]
+					= js_emulated_btns_held[ch][j][k];
+				js_emulated_btns_held[ch][j][k] = false;
 			}
 
-			if(y > 0.2F) {
-				js_emulated_btns_held[j][0] = true;
-			} else if(y < -0.2F) {
-				js_emulated_btns_held[j][1] = true;
+			if(joystick_input[ch][j].available) {
+				float x = joystick_input[ch][j].dx
+					* joystick_input[ch][j].magnitude;
+				float y = joystick_input[ch][j].dy
+					* joystick_input[ch][j].magnitude;
+
+				if(x > 0.2F) {
+					js_emulated_btns_held[ch][j][3] = true;
+				} else if(x < -0.2F) {
+					js_emulated_btns_held[ch][j][2] = true;
+				}
+
+				if(y > 0.2F) {
+					js_emulated_btns_held[ch][j][0] = true;
+				} else if(y < -0.2F) {
+					js_emulated_btns_held[ch][j][1] = true;
+				}
 			}
 		}
 	}
 }
 
-static uint32_t input_wpad_translate(int key) {
+static uint32_t input_wpad_translate(int key, int chan) {
 	switch(key) {
 		case 0: return WPAD_BUTTON_UP;
 		case 1: return WPAD_BUTTON_DOWN;
@@ -251,7 +274,7 @@ static uint32_t input_wpad_translate(int key) {
 	}
 
 	expansion_t e;
-	WPAD_Expansion(WPAD_CHAN_0, &e);
+	WPAD_Expansion(chan, &e);
 
 	if(e.type == WPAD_EXP_NUNCHUK) {
 		switch(key) {
@@ -296,26 +319,44 @@ static uint32_t input_wpad_translate(int key) {
 	return 0;
 }
 
-void input_native_key_status(int key, bool* pressed, bool* released,
-							 bool* held) {
+// Channel-aware button state (issue #140): device N reads WPAD channel N with
+// the SAME config bindings — that is the whole Wii device-routing model.
+static void input_native_key_status_dev(int key, int chan, bool* pressed,
+										bool* released, bool* held) {
+	if(chan < 0 || chan >= WPAD_LOCAL_CHANNELS)
+		chan = 0;
+
 	if(key >= 900 && key < 924) {
 		int js = (key - 900) / 10;
 		int offset = (key - 900) % 10;
 		if(offset < 4) {
-			*held = js_emulated_btns_held[js][offset]
-				&& js_emulated_btns_prev[js][offset];
-			*pressed = js_emulated_btns_held[js][offset]
-				&& !js_emulated_btns_prev[js][offset];
-			*released = !js_emulated_btns_held[js][offset]
-				&& js_emulated_btns_prev[js][offset];
+			*held = js_emulated_btns_held[chan][js][offset]
+				&& js_emulated_btns_prev[chan][js][offset];
+			*pressed = js_emulated_btns_held[chan][js][offset]
+				&& !js_emulated_btns_prev[chan][js][offset];
+			*released = !js_emulated_btns_held[chan][js][offset]
+				&& js_emulated_btns_prev[chan][js][offset];
 			return;
 		}
 	}
 
-	*pressed = WPAD_ButtonsDown(WPAD_CHAN_0) & input_wpad_translate(key);
-	*released = WPAD_ButtonsUp(WPAD_CHAN_0) & input_wpad_translate(key);
-	*held = !(*pressed) && !(*released)
-		&& WPAD_ButtonsHeld(WPAD_CHAN_0) & input_wpad_translate(key);
+	uint32_t mask = input_wpad_translate(key, chan);
+	*pressed = WPAD_ButtonsDown(chan) & mask;
+	*released = WPAD_ButtonsUp(chan) & mask;
+	*held = !(*pressed) && !(*released) && (WPAD_ButtonsHeld(chan) & mask);
+}
+
+void input_native_key_status(int key, bool* pressed, bool* released,
+							 bool* held) {
+	input_native_key_status_dev(key, 0, pressed, released, held);
+}
+
+// Re-issue the IR resolution after gfx_setup has picked the real screen
+// aspect: input_init runs first and latches the 802-wide default, which on a
+// 4:3 console (640 gfx units) would skew every IR position ~25% right.
+void input_ir_vres_update(void) {
+	for(int chan = 0; chan < WPAD_LOCAL_CHANNELS; chan++)
+		WPAD_SetVRes(chan, gfx_window_width(), gfx_window_height());
 }
 
 bool input_native_key_symbol(int key, int* symbol, int* symbol_help,
@@ -425,14 +466,25 @@ bool input_pointer(float* x, float* y, float* angle) {
 	return ir.valid;
 }
 
-void input_native_joystick(float dt, float* dx, float* dy) {
-	if(joystick_input[0].available && joystick_input[0].magnitude > 0.1F) {
-		*dx = joystick_input[0].dx * joystick_input[0].magnitude * dt;
-		*dy = joystick_input[0].dy * joystick_input[0].magnitude * dt;
-	} else if(joystick_input[2].available
-			  && joystick_input[2].magnitude > 0.1F) {
-		*dx = joystick_input[2].dx * joystick_input[2].magnitude * dt;
-		*dy = joystick_input[2].dy * joystick_input[2].magnitude * dt;
+// Per-channel camera input (issue #140): the channel's own extension stick if
+// one is live, else that channel's IR edge-pan fallback.
+static void input_native_joystick_dev(float dt, float* dx, float* dy,
+									  int chan) {
+	if(chan < 0 || chan >= WPAD_LOCAL_CHANNELS)
+		chan = 0;
+
+	if(joystick_input[chan][0].available
+	   && joystick_input[chan][0].magnitude > 0.1F) {
+		*dx = joystick_input[chan][0].dx * joystick_input[chan][0].magnitude
+			* dt;
+		*dy = joystick_input[chan][0].dy * joystick_input[chan][0].magnitude
+			* dt;
+	} else if(joystick_input[chan][2].available
+			  && joystick_input[chan][2].magnitude > 0.1F) {
+		*dx = joystick_input[chan][2].dx * joystick_input[chan][2].magnitude
+			* dt;
+		*dy = joystick_input[chan][2].dy * joystick_input[chan][2].magnitude
+			* dt;
 	} else {
 		// Fallback when no extension stick is available (e.g. Dolphin's
 		// emulated Wiimote, whose Nunchuk/Classic never complete the WPAD
@@ -441,13 +493,13 @@ void input_native_joystick(float dt, float* dx, float* dy) {
 		// it, scaled by how far it is from center; the inner zone is neutral
 		// so the view doesn't drift while aiming.
 		struct ir_t ir;
-		WPAD_IR(WPAD_CHAN_0, &ir);
+		WPAD_IR(chan, &ir);
 		*dx = 0.0F;
 		*dy = 0.0F;
 		// Hold the view still while mining: CavEX resets dig progress whenever
 		// the targeted cell changes, so even slight edge-pan drift would keep
 		// restarting the dig and blocks would never break.
-		if(ir.valid && !input_held(IB_ACTION1)) {
+		if(ir.valid && !input_held_dev(IB_ACTION1, chan)) {
 			float nx = ir.x / (ir.vres[0] ? ir.vres[0] : 640) * 2.0F - 1.0F;
 			float ny = ir.y / (ir.vres[1] ? ir.vres[1] : 480) * 2.0F - 1.0F;
 			float dead = 0.15F;
@@ -459,6 +511,10 @@ void input_native_joystick(float dt, float* dx, float* dy) {
 				*dy = -(ny > 0 ? 1 : -1) * (ay - dead) / (1.0F - dead) * speed * dt;
 		}
 	}
+}
+
+void input_native_joystick(float dt, float* dx, float* dy) {
+	input_native_joystick_dev(dt, dx, dy, 0);
 }
 
 #endif
@@ -632,7 +688,8 @@ bool input_pressed_dev(enum input_button b, int device) {
 
 	for(size_t k = 0; k < length; k++) {
 		bool pressed, released, held;
-		input_native_key_status(mapping[k], &pressed, &released, &held);
+		input_native_key_status_dev(mapping[k], device, &pressed, &released,
+									&held);
 		if(pressed)
 			any_pressed = true;
 		if(released)
@@ -675,7 +732,8 @@ bool input_released_dev(enum input_button b, int device) {
 
 	for(size_t k = 0; k < length; k++) {
 		bool pressed, released, held;
-		input_native_key_status(mapping[k], &pressed, &released, &held);
+		input_native_key_status_dev(mapping[k], device, &pressed, &released,
+									&held);
 		if(pressed)
 			any_pressed = true;
 		if(released)
@@ -713,7 +771,8 @@ bool input_held_dev(enum input_button b, int device) {
 
 	for(size_t k = 0; k < length; k++) {
 		bool pressed, released, held;
-		input_native_key_status(mapping[k], &pressed, &released, &held);
+		input_native_key_status_dev(mapping[k], device, &pressed, &released,
+									&held);
 		if(pressed)
 			any_pressed = true;
 		if(held)
@@ -745,9 +804,21 @@ bool input_joystick_dev(float dt, float* x, float* y, int device) {
 		return true;
 	}
 
-	// Devices >= 1 have no pointer of their own (one mouse, shared keyboard), so
-	// the camera is steered with the discrete IB_LOOK_* keys. The magnitude is a
-	// per-frame constant tuned to roughly match a comfortable mouse turn rate;
+#ifdef PLATFORM_WII
+	// Wii: each further local player steers its camera with its own Wiimote
+	// channel — extension stick, or its IR edge-pan fallback (issue #140).
+	// Devices past the polled channels have no input source at all: say so
+	// instead of silently clamping onto another player's Wiimote.
+	if(device < WPAD_LOCAL_CHANNELS) {
+		input_native_joystick_dev(dt, x, y, device);
+		return true;
+	}
+
+	return false;
+#else
+	// PC devices >= 1 have no pointer of their own (one mouse, shared keyboard),
+	// so the camera is steered with the discrete IB_LOOK_* keys. The magnitude is
+	// a per-frame constant tuned to roughly match a comfortable mouse turn rate;
 	// camera_attach() scales it by 2 like the mouse delta.
 	const float look_speed = 0.018F;
 	float lx = 0.0F, ly = 0.0F;
@@ -764,6 +835,7 @@ bool input_joystick_dev(float dt, float* x, float* y, int device) {
 	*x = lx;
 	*y = ly;
 	return true;
+#endif
 }
 
 bool input_joystick(float dt, float* x, float* y) {

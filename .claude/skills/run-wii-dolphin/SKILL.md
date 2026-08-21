@@ -53,6 +53,13 @@ GX, WPAD); for game-logic iteration prefer the `dev-native-pc` skill.
    IR pointer (menus) / edge-pan look (in-game; freezes while LMB held),
    LMB mine, RMB place, Space jump, E inventory, wheel hotbar, Esc save&quit.
 
+   **Two-player (issue #140):** `[Wiimote2] Source = 1` is configured on this
+   machine (backup: `WiimoteNew.ini.bak-2p`). Player 2 keys: IJKL move,
+   arrows = IR edge-pan look, `,` mine, `.` place, Right-Shift jump,
+   `p` inventory, `u`/`o` hotbar. Pick "2 Players" on the world-select
+   screen (P1's d-pad left/right = A/D keys) — Wii splits top/bottom.
+   For scripted P2 input use a Pipe device on `[Wiimote2]` instead.
+
 4. **See the screen yourself** (no desktop screenshot tool works here):
    enable Dolphin frame dump, then Read the PNGs:
 

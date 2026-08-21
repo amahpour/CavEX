@@ -72,6 +72,10 @@ enum input_category {
 
 void input_init(void);
 void input_poll(void);
+// Wii only: re-issue WPAD_SetVRes once gfx_setup has picked the real screen
+// aspect — input_init runs first and latches the 802-wide default (no-op
+// concept on PC; only the Wii gfx backend calls it).
+void input_ir_vres_update(void);
 
 bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 				  enum input_category* category);

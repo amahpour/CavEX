@@ -34,6 +34,13 @@
 #include "input.h"
 
 const char* input_config_key(enum input_button b, int device) {
+#ifdef PLATFORM_WII
+	// Wii tells players apart by WPAD channel, not by key-name set: both
+	// Wiimotes share the device-0 bindings (issue #140). Collapsing the device
+	// index HERE — the one routing authority — keeps any caller correct; the
+	// player2_* key sets below are a PC concept (one shared keyboard).
+	device = 0;
+#endif
 	if(device <= 0) {
 		switch(b) {
 			case IB_ACTION1: return "input.item_action_left";
