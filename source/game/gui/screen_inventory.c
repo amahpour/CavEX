@@ -522,7 +522,8 @@ static void screen_inventory_render2D(struct screen* s, int width, int height) {
 			&leggings :
 			NULL,
 		inventory_get_slot(inv, INVENTORY_SLOT_ARMOR + 3, &boots) ? &boots :
-																	NULL);
+																	NULL,
+		1.0F);
 	gfx_write_buffers(true, false, false);
 	gfx_matrix_modelview(GLM_MAT4_IDENTITY);
 
