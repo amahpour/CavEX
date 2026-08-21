@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "harness.h"
 #include "item/inventory.h"
@@ -8,16 +9,18 @@
 #include "stubs/items_stub.h"
 #include "test_path.h"
 
+static void copy_fixture_world(string_t out_dir);
+static void remove_fixture_world(string_t dir);
+
+// Runs on a temp COPY of the fixture: the write marks the archive modified, so
+// destroy rewrites level.dat — done in place it races the parallel coverage
+// workers reading the shared committed fixture (rare torn-gzip crash).
 TEST(level_archive_read_write_time) {
-	char dir[512];
 	struct level_archive la = {0};
 	string_t world_dir;
 	int64_t time = 0;
 
-	test_fixture_path(dir, sizeof(dir), "level.dat");
-	dir[strlen(dir) - strlen("/level.dat")] = '\0';
-
-	string_init_printf(world_dir, "%s", dir);
+	copy_fixture_world(world_dir);
 	ASSERT(level_archive_create(&la, world_dir));
 
 	ASSERT(level_archive_read(&la, LEVEL_TIME, &time, 0));
@@ -26,6 +29,7 @@ TEST(level_archive_read_write_time) {
 	ASSERT_EQ(time, 12345);
 
 	level_archive_destroy(&la);
+	remove_fixture_world(world_dir);
 	string_clear(world_dir);
 }
 
@@ -103,6 +107,16 @@ static void copy_fixture_world(string_t out_dir) {
 	string_init_printf(out_dir, "%s", base);
 }
 
+// Best-effort teardown for copy_fixture_world dirs: without it every suite
+// run leaks a /tmp/cavex_level_* directory per caller (times the parallel
+// coverage workers).
+static void remove_fixture_world(string_t dir) {
+	char path[600];
+	snprintf(path, sizeof(path), "%s/level.dat", string_get_cstr(dir));
+	unlink(path);
+	rmdir(string_get_cstr(dir));
+}
+
 TEST(level_archive_player_roundtrip) {
 	struct level_archive la = {0};
 	string_t world_dir;
@@ -133,6 +147,7 @@ TEST(level_archive_player_roundtrip) {
 	ASSERT_EQ(dim, WORLD_DIM_NETHER);
 
 	level_archive_destroy(&la);
+	remove_fixture_world(world_dir);
 	string_clear(world_dir);
 }
 
@@ -176,6 +191,7 @@ TEST(level_archive_inventory_roundtrip) {
 	inventory_destroy(&inv);
 	inventory_destroy(&loaded);
 	level_archive_destroy(&la);
+	remove_fixture_world(world_dir);
 	string_clear(world_dir);
 }
 
@@ -208,6 +224,7 @@ TEST(level_archive_write_player_rejects_origin) {
 	ASSERT_NEAR(pos_out[2], 100.0, 0.0001);
 
 	level_archive_destroy(&la);
+	remove_fixture_world(world_dir);
 	string_clear(world_dir);
 }
 
@@ -257,6 +274,7 @@ TEST(level_archive_gamemode_roundtrip) {
 	ASSERT_EQ(gm, 0);
 
 	level_archive_destroy(&la);
+	remove_fixture_world(world_dir);
 	string_clear(world_dir);
 }
 
