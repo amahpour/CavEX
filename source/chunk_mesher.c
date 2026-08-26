@@ -67,6 +67,20 @@ static struct block_data
 	mesher_blocks[CHUNK_MESHER_QLENGTH][(CHUNK_SIZE + 2) * (CHUNK_SIZE + 2)
 									   * (CHUNK_SIZE + 2)];
 
+// Transient per-remesh scratch buffers. Like mesher_blocks above, these used
+// to be malloc'd on every remesh and guarded only by assert(), which the
+// release build compiles out (-DNDEBUG in the Makefile). Once the Wii heap is
+// tight — e.g. the 2-player build's extra viewport, window and texture memory —
+// the malloc returns NULL and the mesher writes ~17 KB of vertex-light through
+// the NULL pointer per chunk: Dolphin logs an "Invalid write to 0x…" per byte
+// (millions of lines, a multi-GB log) and it would hard-crash on real hardware.
+// There is exactly one mesher thread (chunk_mesher_local_thread), and the
+// build/test helpers below only ever run on it, so a single static buffer per
+// scratch area is safe and — unlike malloc — can never fail under heap pressure.
+static uint8_t mesher_light_data[(CHUNK_SIZE + 2) * (CHUNK_SIZE + 2)
+								 * (CHUNK_SIZE + 2) * 3];
+static bool mesher_visited[CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+
 static int chunk_test_side(enum side* on_sides, c_coord_t x, c_coord_t y,
 						   c_coord_t z) {
 	assert(on_sides);
@@ -151,28 +165,33 @@ static void chunk_test_init(struct block_data* bd, uint8_t* reachable) {
 
 	memset(reachable, 0, 6 * sizeof(uint8_t));
 
-	bool* visited = malloc(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE);
-	assert(visited);
+	// Static scratch (single mesher thread; see mesher_light_data note).
+	memset(mesher_visited, false, sizeof(mesher_visited));
 
-	memset(visited, false, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE);
-
-	struct stack queue;
-	stack_create(&queue, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE / 4,
-				 sizeof(uint8_t[3]));
+	// One persistent BFS queue, sized to the worst case (every cell queued at
+	// once) so stack_push never has to grow — no per-remesh (re)allocation, and
+	// nothing that can fail mid-build once it exists.
+	static struct stack queue;
+	static bool queue_ready = false;
+	if(!queue_ready) {
+		stack_create(&queue, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE,
+					 sizeof(uint8_t[3]));
+		queue_ready = true;
+	}
 
 	for(int y = 0; y < CHUNK_SIZE; y++) {
 		for(int x = 0; x < CHUNK_SIZE; x++) {
-			chunk_test(bd, &queue, visited, reachable, x, y, 0);
-			chunk_test(bd, &queue, visited, reachable, x, 0, y);
-			chunk_test(bd, &queue, visited, reachable, 0, x, y);
-			chunk_test(bd, &queue, visited, reachable, x, y, CHUNK_SIZE - 1);
-			chunk_test(bd, &queue, visited, reachable, x, CHUNK_SIZE - 1, y);
-			chunk_test(bd, &queue, visited, reachable, CHUNK_SIZE - 1, x, y);
+			chunk_test(bd, &queue, mesher_visited, reachable, x, y, 0);
+			chunk_test(bd, &queue, mesher_visited, reachable, x, 0, y);
+			chunk_test(bd, &queue, mesher_visited, reachable, 0, x, y);
+			chunk_test(bd, &queue, mesher_visited, reachable, x, y,
+					   CHUNK_SIZE - 1);
+			chunk_test(bd, &queue, mesher_visited, reachable, x, CHUNK_SIZE - 1,
+					   y);
+			chunk_test(bd, &queue, mesher_visited, reachable, CHUNK_SIZE - 1, x,
+					   y);
 		}
 	}
-
-	stack_destroy(&queue);
-	free(visited);
 }
 
 static void chunk_mesher_vertex_light(struct block_data* bd,
@@ -280,7 +299,10 @@ static void chunk_mesher_rebuild(struct block_data* bd, w_coord_t cx,
 								 size_t* vertices) {
 	assert(bd && d && vertices);
 
-	uint8_t* light_data = NULL;
+	// Points at the static scratch buffer (never NULL); the vertex-light is
+	// computed at most once per rebuild, and only if some face is visible.
+	uint8_t* light_data = mesher_light_data;
+	bool light_computed = false;
 
 	for(int k = 0; k < 13; k++)
 		vertices[k] = 0;
@@ -352,11 +374,8 @@ static void chunk_mesher_rebuild(struct block_data* bd, w_coord_t cx,
 
 						if(face_visible
 						   || blocks[local.type]->renderBlockAlways) {
-							if(!light_data) {
-								light_data
-									= malloc((CHUNK_SIZE + 2) * (CHUNK_SIZE + 2)
-											 * (CHUNK_SIZE + 2) * 3);
-								assert(light_data);
+							if(!light_computed) {
+								light_computed = true;
 								chunk_mesher_vertex_light(bd, light_data);
 							}
 
@@ -483,9 +502,6 @@ static void chunk_mesher_rebuild(struct block_data* bd, w_coord_t cx,
 			}
 		}
 	}
-
-	if(light_data)
-		free(light_data);
 }
 
 static void chunk_mesher_build(struct chunk_mesher_rpc* req) {
