@@ -94,8 +94,8 @@ static bool onItemPlace(struct server_local* s, struct item_data* it,
 						struct block_info* where, struct block_info* on,
 						enum side on_side) {
 	int metadata = 0;
-	double dx = s->player.x - (where->x + 0.5);
-	double dz = s->player.z - (where->z + 0.5);
+	double dx = s->acting->x - (where->x + 0.5);
+	double dz = s->acting->z - (where->z + 0.5);
 
 	if(fabs(dx) > fabs(dz)) {
 		metadata = (dx >= 0) ? 5 : 4;
@@ -114,7 +114,7 @@ static bool onItemPlace(struct server_local* s, struct item_data* it,
 	blk_info.block = &blk;
 
 	if(entity_local_player_block_collide(
-		   (vec3) {s->player.x, s->player.y, s->player.z}, &blk_info))
+		   (vec3) {s->acting->x, s->acting->y, s->acting->z}, &blk_info))
 		return false;
 
 	server_world_set_block(&s->world, where->x, where->y, where->z, blk);
@@ -124,17 +124,21 @@ static bool onItemPlace(struct server_local* s, struct item_data* it,
 static void onRightClick(struct server_local* s, struct item_data* it,
 						 struct block_info* where, struct block_info* on,
 						 enum side on_side) {
-	if(s->player.active_inventory == &s->player.inventory) {
+	// Open for the player that clicked (issue #139): the window wraps THAT
+	// player's main/hotbar slots and its GUI runs on that player's device.
+	struct server_player* sp = s->acting;
+	if(sp->active_inventory == &sp->inventory) {
 		clin_rpc_send(&(struct client_rpc) {
 			.type = CRPC_OPEN_WINDOW,
 			.payload.window_open.window = WINDOWC_FURNACE,
 			.payload.window_open.type = WINDOW_TYPE_FURNACE,
 			.payload.window_open.slot_count = FURNACE_SIZE,
+			.payload.window_open.player = (sp == &s->player2) ? 1 : 0,
 		});
 
 		struct inventory* inv = malloc(sizeof(struct inventory));
-		inventory_create(inv, &inventory_logic_furnace, s, FURNACE_SIZE);
-		s->player.active_inventory = inv;
+		inventory_create(inv, &inventory_logic_furnace, sp, FURNACE_SIZE);
+		sp->active_inventory = inv;
 	}
 }
 

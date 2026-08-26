@@ -103,6 +103,8 @@ void mp_swap_active_view(void) {
 	uint32_t ti = gstate.local_player_id;
 	gstate.local_player_id = gstate.local_player2_id;
 	gstate.local_player2_id = ti;
+
+	gstate.mp_active ^= 1;
 }
 
 int main(void) {
@@ -124,6 +126,7 @@ int main(void) {
 	// (PC) enables a second local player -- vertical split, second camera, input
 	// device 1 (the player2_* bindings).
 	gstate.num_local_players = 1;
+	gstate.mp_active = 0;
 #ifdef PLATFORM_PC
 	if(getenv("CAVEX_2P"))
 		gstate.num_local_players = 2;

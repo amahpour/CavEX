@@ -38,6 +38,9 @@ TEST(firework_item_and_use) {
 	s.player.x = 10.0;
 	s.player.y = 64.0;
 	s.player.z = -7.0;
+	// invariant from server_local_create (issue #139): `acting` always points
+	// at a valid player — item/block callbacks read the acting player's pos
+	s.acting = &s.player;
 
 	test_client_rpc_count = 0;
 	memset(&test_last_client_rpc, 0, sizeof(test_last_client_rpc));

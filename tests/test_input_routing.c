@@ -56,16 +56,24 @@ TEST(input_routing_look_keys) {
 	ASSERT(key_is(IB_LOOK_RIGHT, 1, "input.player2_look_right"));
 }
 
-// Player 2 has no menu/GUI bindings in this milestone, so those buttons are
-// unbound on device 1 -- this is what stops a shared keyboard from firing a P1
-// menu action and a P2 movement at once.
-TEST(input_routing_player2_has_no_menu) {
-	ASSERT(input_config_key(IB_INVENTORY, 1) == NULL);
+// Player 2 owns its inventory/GUI keys (issue #139) so it can drive its own
+// screens; world-level buttons (save&quit, map, creative, screenshot) stay
+// player-1 only so a shared keyboard cannot fire them from P2's cluster.
+TEST(input_routing_player2_menu_split) {
+	ASSERT(key_is(IB_INVENTORY, 1, "input.player2_inventory"));
+	ASSERT(key_is(IB_SCROLL_LEFT, 1, "input.player2_scroll_left"));
+	ASSERT(key_is(IB_SCROLL_RIGHT, 1, "input.player2_scroll_right"));
+	ASSERT(key_is(IB_GUI_UP, 1, "input.player2_gui_up"));
+	ASSERT(key_is(IB_GUI_DOWN, 1, "input.player2_gui_down"));
+	ASSERT(key_is(IB_GUI_LEFT, 1, "input.player2_gui_left"));
+	ASSERT(key_is(IB_GUI_RIGHT, 1, "input.player2_gui_right"));
+	ASSERT(key_is(IB_GUI_CLICK, 1, "input.player2_gui_click"));
+	ASSERT(key_is(IB_GUI_CLICK_ALT, 1, "input.player2_gui_click_alt"));
+
 	ASSERT(input_config_key(IB_HOME, 1) == NULL);
 	ASSERT(input_config_key(IB_SCREENSHOT, 1) == NULL);
 	ASSERT(input_config_key(IB_MAP, 1) == NULL);
 	ASSERT(input_config_key(IB_TOGGLE_CREATIVE, 1) == NULL);
-	ASSERT(input_config_key(IB_GUI_CLICK, 1) == NULL);
 }
 
 const test_entry_t g_tests_input_routing[] = {
@@ -73,8 +81,8 @@ const test_entry_t g_tests_input_routing[] = {
 	 test_input_routing_device0_matches_player1},
 	{"input_routing_device1_is_player2", test_input_routing_device1_is_player2},
 	{"input_routing_look_keys", test_input_routing_look_keys},
-	{"input_routing_player2_has_no_menu",
-	 test_input_routing_player2_has_no_menu},
+	{"input_routing_player2_menu_split",
+	 test_input_routing_player2_menu_split},
 };
 
 const size_t g_tests_input_routing_count

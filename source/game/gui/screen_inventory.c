@@ -57,6 +57,19 @@ struct inv_slot {
 	size_t slot;
 };
 
+// Local player whose inventory this screen edits (issue #139): its input
+// device drives the GUI, its container is shown, and every RPC carries it.
+static uint8_t inv_owner;
+
+void screen_inventory_set_owner(uint8_t player) {
+	inv_owner = player;
+}
+
+// The owner's base-inventory window id (server mirrors P2 under window 3).
+static uint8_t inv_window(void) {
+	return inv_owner == 1 ? WINDOWC_INVENTORY_P2 : WINDOWC_INVENTORY;
+}
+
 static bool pointer_has_item;
 static bool pointer_available;
 static float pointer_x, pointer_y, pointer_angle;
@@ -149,6 +162,7 @@ static void cinv_send_set_picked(uint16_t id) {
 	svin_rpc_send(&(struct server_rpc) {
 		.type = SRPC_CREATIVE_SET_PICKED,
 		.payload.creative_set_picked.item_id = id,
+		.payload.creative_set_picked.player = inv_owner,
 	});
 }
 
@@ -157,6 +171,8 @@ static void screen_inventory_reset(struct screen* s, int width, int height) {
 
 	if(gstate.local_player)
 		gstate.local_player->data.local_player.capture_input = false;
+	if(gstate.local_player2)
+		gstate.local_player2->data.local_player.capture_input = false;
 
 	cinv_page = 0;
 	// In creative, open with keyboard focus already ON the grab strip so WASD /
@@ -182,7 +198,7 @@ static void screen_inventory_reset(struct screen* s, int width, int height) {
 	for(int k = 0; k < INVENTORY_SIZE_HOTBAR; k++) {
 		if(k
 		   == (int)inventory_get_hotbar(
-			   windowc_get_latest(gstate.windows[WINDOWC_INVENTORY])))
+			   windowc_get_latest(gstate.windows[inv_window()])))
 			selected_slot = slots_index;
 
 		slots[slots_index++] = (struct inv_slot) {
@@ -216,10 +232,11 @@ static void screen_inventory_reset(struct screen* s, int width, int height) {
 }
 
 static void screen_inventory_update(struct screen* s, float dt) {
-	if(input_pressed(IB_INVENTORY)) {
+	if(input_pressed_dev(IB_INVENTORY, inv_owner)) {
 		svin_rpc_send(&(struct server_rpc) {
 			.type = SRPC_WINDOW_CLOSE,
-			.payload.window_close.window = WINDOWC_INVENTORY,
+			.payload.window_close.window = inv_window(),
+			.payload.window_close.player = inv_owner,
 		});
 
 		screen_set(&screen_ingame);
@@ -236,18 +253,18 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		if(cinv_sel >= cinv_page_size())
 			cinv_sel = cinv_page_size() - 1;
 
-		if(input_pressed(IB_CREATIVE_PAGE) || input_pressed(IB_SCROLL_RIGHT))
+		if(input_pressed_dev(IB_CREATIVE_PAGE, inv_owner) || input_pressed_dev(IB_SCROLL_RIGHT, inv_owner))
 			cinv_page = (cinv_page + 1) % cinv_page_count();
-		if(input_pressed(IB_SCROLL_LEFT))
+		if(input_pressed_dev(IB_SCROLL_LEFT, inv_owner))
 			cinv_page
 				= (cinv_page + cinv_page_count() - 1) % cinv_page_count();
 
 		float gpx, gpy, gpa;
-		if(input_pointer(&gpx, &gpy, &gpa)) {
+		if(inv_owner == 0 && input_pointer(&gpx, &gpy, &gpa)) {
 			int cell = cinv_cell_at(gfx_width(), gfx_height(), gpx, gpy);
 			if(cell >= 0
-			   && (input_pressed(IB_GUI_CLICK)
-				   || input_pressed(IB_GUI_CLICK_ALT))) {
+			   && (input_pressed_dev(IB_GUI_CLICK, inv_owner)
+				   || input_pressed_dev(IB_GUI_CLICK_ALT, inv_owner))) {
 				cinv_send_set_picked(
 					creative_inventory_item_id((size_t)cell));
 				return; // consumed -- do not also click a slot
@@ -255,25 +272,27 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		}
 	}
 
-	if(cinv_sel < 0 && input_pressed(IB_GUI_CLICK)) {
+	if(cinv_sel < 0 && input_pressed_dev(IB_GUI_CLICK, inv_owner)) {
 		uint16_t action_id;
-		if(windowc_new_action(gstate.windows[WINDOWC_INVENTORY], &action_id,
+		if(windowc_new_action(gstate.windows[inv_window()], &action_id,
 							  false, slots[selected_slot].slot)) {
 			svin_rpc_send(&(struct server_rpc) {
 				.type = SRPC_WINDOW_CLICK,
-				.payload.window_click.window = WINDOWC_INVENTORY,
+				.payload.window_click.window = inv_window(),
+				.payload.window_click.player = inv_owner,
 				.payload.window_click.action_id = action_id,
 				.payload.window_click.right_click = false,
 				.payload.window_click.slot = slots[selected_slot].slot,
 			});
 		}
-	} else if(cinv_sel < 0 && input_pressed(IB_GUI_CLICK_ALT)) {
+	} else if(cinv_sel < 0 && input_pressed_dev(IB_GUI_CLICK_ALT, inv_owner)) {
 		uint16_t action_id;
-		if(windowc_new_action(gstate.windows[WINDOWC_INVENTORY], &action_id,
+		if(windowc_new_action(gstate.windows[inv_window()], &action_id,
 							  true, slots[selected_slot].slot)) {
 			svin_rpc_send(&(struct server_rpc) {
 				.type = SRPC_WINDOW_CLICK,
-				.payload.window_click.window = WINDOWC_INVENTORY,
+				.payload.window_click.window = inv_window(),
+				.payload.window_click.player = inv_owner,
 				.payload.window_click.action_id = action_id,
 				.payload.window_click.right_click = true,
 				.payload.window_click.slot = slots[selected_slot].slot,
@@ -281,7 +300,8 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		}
 	}
 
-	pointer_available = input_pointer(&pointer_x, &pointer_y, &pointer_angle);
+	pointer_available = inv_owner == 0
+		&& input_pointer(&pointer_x, &pointer_y, &pointer_angle);
 
 	size_t slot_nearest[4]
 		= {selected_slot, selected_slot, selected_slot, selected_slot};
@@ -338,7 +358,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		int row = cinv_sel / CINV_COLS;
 		int pc = cinv_page_count();
 
-		if(input_pressed(IB_GUI_LEFT)) {
+		if(input_pressed_dev(IB_GUI_LEFT, inv_owner)) {
 			if(col > 0) {
 				col--;
 			} else {
@@ -346,7 +366,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 				col = CINV_COLS - 1;
 			}
 		}
-		if(input_pressed(IB_GUI_RIGHT)) {
+		if(input_pressed_dev(IB_GUI_RIGHT, inv_owner)) {
 			if(col < CINV_COLS - 1) {
 				col++;
 			} else {
@@ -354,9 +374,9 @@ static void screen_inventory_update(struct screen* s, float dt) {
 				col = 0;
 			}
 		}
-		if(input_pressed(IB_GUI_UP) && row > 0)
+		if(input_pressed_dev(IB_GUI_UP, inv_owner) && row > 0)
 			row--;
-		if(input_pressed(IB_GUI_DOWN)) {
+		if(input_pressed_dev(IB_GUI_DOWN, inv_owner)) {
 			if(row < cinv_rows() - 1)
 				row++;
 			else
@@ -365,7 +385,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 
 		if(cinv_sel >= 0) {
 			cinv_sel = row * CINV_COLS + col;
-			if(input_pressed(IB_GUI_CLICK) || input_pressed(IB_GUI_CLICK_ALT)) {
+			if(input_pressed_dev(IB_GUI_CLICK, inv_owner) || input_pressed_dev(IB_GUI_CLICK_ALT, inv_owner)) {
 				size_t idx
 					= (size_t)cinv_page * cinv_page_size() + (size_t)cinv_sel;
 				if(idx < creative_inventory_count())
@@ -373,17 +393,17 @@ static void screen_inventory_update(struct screen* s, float dt) {
 			}
 		}
 	} else {
-		if(input_pressed(IB_GUI_LEFT)) {
+		if(input_pressed_dev(IB_GUI_LEFT, inv_owner)) {
 			selected_slot = slot_nearest[0];
 			pointer_has_item = false;
 		}
 
-		if(input_pressed(IB_GUI_RIGHT)) {
+		if(input_pressed_dev(IB_GUI_RIGHT, inv_owner)) {
 			selected_slot = slot_nearest[1];
 			pointer_has_item = false;
 		}
 
-		if(input_pressed(IB_GUI_UP)) {
+		if(input_pressed_dev(IB_GUI_UP, inv_owner)) {
 			// Off the top of the inventory in creative -> step into the strip.
 			if(creative_active() && slot_nearest[2] == selected_slot) {
 				cinv_sel = (cinv_rows() - 1) * CINV_COLS;
@@ -393,7 +413,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 			}
 		}
 
-		if(input_pressed(IB_GUI_DOWN)) {
+		if(input_pressed_dev(IB_GUI_DOWN, inv_owner)) {
 			selected_slot = slot_nearest[3];
 			pointer_has_item = false;
 		}
@@ -450,7 +470,7 @@ static void cinv_render2d(int width, int height) {
 
 	// hovered item name
 	float px, py, ang;
-	if(input_pointer(&px, &py, &ang)) {
+	if(inv_owner == 0 && input_pointer(&px, &py, &ang)) {
 		int cell = cinv_cell_at(width, height, px, py);
 		if(cell >= 0) {
 			uint16_t id = creative_inventory_item_id((size_t)cell);
@@ -470,7 +490,7 @@ static void cinv_render2d(int width, int height) {
 
 static void screen_inventory_render2D(struct screen* s, int width, int height) {
 	struct inventory* inv
-		= windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]);
+		= windowc_get_latest(gstate.windows[inv_window()]);
 
 	// darken background
 	gfx_texture(false);

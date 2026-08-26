@@ -20,3 +20,10 @@
 #include "game_state.h"
 
 struct game_state gstate;
+
+struct window_container* mp_player_windowc(int device) {
+	if(device == 1 && gstate.windows[WINDOWC_INVENTORY_P2])
+		return gstate.windows[WINDOWC_INVENTORY_P2];
+
+	return gstate.windows[WINDOWC_INVENTORY];
+}

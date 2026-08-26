@@ -267,6 +267,14 @@ void entity_villager_wander(float* yaw, vec3 vel, int turn, int forward,
 
 uint32_t entity_gen_id(dict_entity_t dict);
 
+// Fixed CLIENT-side entity id for split-screen player 2 (issue #139). The
+// server never learns this entity exists, but its own ids (entity_gen_id =
+// max-key+1 over the server dict, so 1, 2, 3, ...) share the client dict via
+// CRPC_SPAWN_*. Allocating P2 from entity_gen_id(client dict) produced id 1 —
+// the SAME id as the server's first spawned entity, whose CRPC_ENTITY_DESTROY
+// then deleted player 2 (first dig drop in 2P killed the split screen).
+#define ENTITY_ID_LOCAL_PLAYER2 0xFFFFFFFEu
+
 // Per-entity callback for entity_tick_all(). Invoked once for every entity in
 // the dict during a safe walk. Return true to mark the entity for removal; it
 // is erased only after the walk has finished. The callback may freely read and

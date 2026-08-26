@@ -103,7 +103,8 @@ static void inv_post_action(struct inventory* inv, size_t slot, bool right,
 }
 
 static void inv_on_close(struct inventory* inv) {
-	struct server_local* s = inv->user;
+	// inv->user is the OWNING server_player (issue #139).
+	struct server_player* sp = inv->user;
 
 	set_inv_slot_t changes;
 	set_inv_slot_init(changes);
@@ -119,8 +120,8 @@ static void inv_on_close(struct inventory* inv) {
 		if(item.id != 0) {
 			inventory_clear_slot(inv, k);
 			set_inv_slot_push(changes, k);
-			server_local_spawn_item(
-				(vec3) {s->player.x, s->player.y, s->player.z}, &item, true, s);
+			server_local_spawn_item((vec3) {sp->x, sp->y, sp->z}, &item, sp,
+									sp->server);
 		}
 	}
 
@@ -128,8 +129,8 @@ static void inv_on_close(struct inventory* inv) {
 	if(inventory_get_picked_item(inv, &picked_item)) {
 		inventory_clear_picked_item(inv);
 		set_inv_slot_push(changes, SPECIAL_SLOT_PICKED_ITEM);
-		server_local_spawn_item((vec3) {s->player.x, s->player.y, s->player.z},
-								&picked_item, true, s);
+		server_local_spawn_item((vec3) {sp->x, sp->y, sp->z}, &picked_item, sp,
+								sp->server);
 	}
 
 	server_local_send_inv_changes(changes, inv, WINDOWC_CRAFTING);
@@ -160,20 +161,20 @@ static bool inv_on_collect(struct inventory* inv, struct item_data* item) {
 }
 
 static void inv_on_create(struct inventory* inv) {
-	struct server_local* s = inv->user;
+	struct server_player* sp = inv->user;
 
 	set_inv_slot_t changes;
 	set_inv_slot_init(changes);
 
 	for(size_t k = 0; k < INVENTORY_SIZE_HOTBAR; k++) {
 		inv->items[k + CRAFTING_SLOT_HOTBAR]
-			= s->player.inventory.items[k + INVENTORY_SLOT_HOTBAR];
+			= sp->inventory.items[k + INVENTORY_SLOT_HOTBAR];
 		set_inv_slot_push(changes, k + CRAFTING_SLOT_HOTBAR);
 	}
 
 	for(size_t k = 0; k < INVENTORY_SIZE_MAIN; k++) {
 		inv->items[k + CRAFTING_SLOT_MAIN]
-			= s->player.inventory.items[k + INVENTORY_SLOT_MAIN];
+			= sp->inventory.items[k + INVENTORY_SLOT_MAIN];
 		set_inv_slot_push(changes, k + CRAFTING_SLOT_MAIN);
 	}
 
@@ -182,25 +183,25 @@ static void inv_on_create(struct inventory* inv) {
 }
 
 static bool inv_on_destroy(struct inventory* inv) {
-	struct server_local* s = inv->user;
+	struct server_player* sp = inv->user;
 
 	set_inv_slot_t changes;
 	set_inv_slot_init(changes);
 
 	for(size_t k = 0; k < INVENTORY_SIZE_HOTBAR; k++) {
-		s->player.inventory.items[k + INVENTORY_SLOT_HOTBAR]
+		sp->inventory.items[k + INVENTORY_SLOT_HOTBAR]
 			= inv->items[k + CRAFTING_SLOT_HOTBAR];
 		set_inv_slot_push(changes, k + INVENTORY_SLOT_HOTBAR);
 	}
 
 	for(size_t k = 0; k < INVENTORY_SIZE_MAIN; k++) {
-		s->player.inventory.items[k + INVENTORY_SLOT_MAIN]
+		sp->inventory.items[k + INVENTORY_SLOT_MAIN]
 			= inv->items[k + CRAFTING_SLOT_MAIN];
 		set_inv_slot_push(changes, k + INVENTORY_SLOT_MAIN);
 	}
 
-	server_local_send_inv_changes(changes, &s->player.inventory,
-								  WINDOWC_INVENTORY);
+	server_local_send_inv_changes(changes, &sp->inventory,
+								  server_player_inv_window(sp));
 	set_inv_slot_clear(changes);
 	return true;
 }

@@ -32,7 +32,7 @@ static bool minecart_place(struct server_local* s, struct item_data* it,
 	(void)on;
 	(void)on_side;
 
-	float yaw = glm_rad(-(float)s->player.rx);
+	float yaw = glm_rad(-(float)s->acting->rx);
 
 	// Rest the box ON the cell floor, not embedded in it (same reasoning as the
 	// boat: the origin must sit at least MINECART_HEIGHT/2 above the floor or the

@@ -101,6 +101,8 @@ extern const test_entry_t g_tests_villager[];
 extern const size_t g_tests_villager_count;
 extern const test_entry_t g_tests_player_anim[];
 extern const size_t g_tests_player_anim_count;
+extern const test_entry_t g_tests_two_player[];
+extern const size_t g_tests_two_player_count;
 
 const char* g_current_test = "";
 
@@ -109,8 +111,8 @@ typedef struct {
 	size_t count;
 } test_group_t;
 
-static test_group_t groups[33];
-static const size_t group_count = 33;
+static test_group_t groups[34];
+static const size_t group_count = 34;
 
 static void init_groups(void) {
 	groups[0] = (test_group_t){g_tests_stack, g_tests_stack_count};
@@ -154,6 +156,8 @@ static void init_groups(void) {
 	groups[31] = (test_group_t){g_tests_villager, g_tests_villager_count};
 	groups[32]
 		= (test_group_t){g_tests_player_anim, g_tests_player_anim_count};
+	groups[33]
+		= (test_group_t){g_tests_two_player, g_tests_two_player_count};
 }
 
 static void list_tests(const test_entry_t* entries, size_t count) {

@@ -208,6 +208,19 @@ void clin_process(struct client_rpc* call) {
 			windowc_create(gstate.windows[WINDOWC_INVENTORY],
 						   WINDOW_TYPE_INVENTORY, INVENTORY_SIZE);
 
+			// Split-screen player 2 gets its own base inventory container
+			// (issue #139); the server mirrors its slots to window 3.
+			if(gstate.num_local_players >= 2) {
+				gstate.windows[WINDOWC_INVENTORY_P2]
+					= malloc(sizeof(struct window_container));
+				assert(gstate.windows[WINDOWC_INVENTORY_P2]);
+				windowc_create(gstate.windows[WINDOWC_INVENTORY_P2],
+							   WINDOW_TYPE_INVENTORY, INVENTORY_SIZE);
+			}
+
+			// canonical fields hold player 1 again after a reset
+			gstate.mp_active = 0;
+
 			gstate.world_loaded = false;
 			gstate.world.dimension = call->payload.world_reset.dimension;
 
@@ -222,7 +235,7 @@ void clin_process(struct client_rpc* call) {
 			// (player 1 owns the position + chunk-loading sync); player 2 is
 			// co-located with player 1 on each (re)spawn via CRPC_PLAYER_POS.
 			if(gstate.num_local_players >= 2) {
-				gstate.local_player2_id = entity_gen_id(gstate.entities);
+				gstate.local_player2_id = ENTITY_ID_LOCAL_PLAYER2;
 				gstate.local_player2 = dict_entity_safe_get(
 					gstate.entities, gstate.local_player2_id);
 				entity_local_player(gstate.local_player2_id,
@@ -279,10 +292,14 @@ void clin_process(struct client_rpc* call) {
 				switch(call->payload.window_open.type) {
 					case WINDOW_TYPE_WORKBENCH:
 						screen_crafting_set_windowc(window);
+						screen_crafting_set_owner(
+							call->payload.window_open.player);
 						screen_set(&screen_crafting);
 						break;
 					case WINDOW_TYPE_FURNACE:
 						screen_furnace_set_windowc(window);
+						screen_furnace_set_owner(
+							call->payload.window_open.player);
 						screen_set(&screen_furnace);
 						break;
 					default: break;
@@ -359,17 +376,19 @@ void clin_process(struct client_rpc* call) {
 			e->teleport(e, call->payload.spawn_boat.pos);
 		} break;
 		case CRPC_PICKUP_ITEM: {
-			if(gstate.local_player
-			   && call->payload.pickup_item.collector_id
-				   == gstate.local_player->id) {
-				struct entity* e = dict_entity_get(
-					gstate.entities, call->payload.pickup_item.entity_id);
-				if(e)
-					glm_vec3_copy((vec3) {gstate.camera.x,
-										  gstate.camera.y - 0.2F,
-										  gstate.camera.z},
-								  e->network_pos);
-			}
+			// Animate the pickup toward the COLLECTING local player's camera
+			// (issue #139). NB: the canonical camera/camera2 pairing here is
+			// player 1/player 2 — clin_update() runs outside the render's
+			// swapped window, so mp_active is always 0 at this point.
+			bool p2 = call->payload.pickup_item.collector_player == 1;
+			if(p2 && !gstate.local_player2)
+				break;
+			struct camera* c = p2 ? &gstate.camera2 : &gstate.camera;
+			struct entity* e = dict_entity_get(
+				gstate.entities, call->payload.pickup_item.entity_id);
+			if(e)
+				glm_vec3_copy((vec3) {c->x, c->y - 0.2F, c->z},
+							  e->network_pos);
 		} break;
 		case CRPC_ENTITY_DESTROY:
 			dict_entity_erase(gstate.entities,
@@ -399,10 +418,13 @@ void clin_process(struct client_rpc* call) {
 			}
 		} break;
 		case CRPC_GAMEMODE:
-			// Mirror the server's authoritative creative flag onto the client
-			// local player (HUD + dig-timer feel only).
+			// Mirror the server's authoritative creative flag onto BOTH local
+			// players (HUD + dig-timer feel only) — the flag is world-level.
 			if(gstate.local_player)
 				gstate.local_player->data.local_player.creative
+					= call->payload.gamemode.creative;
+			if(gstate.local_player2)
+				gstate.local_player2->data.local_player.creative
 					= call->payload.gamemode.creative;
 			break;
 	}

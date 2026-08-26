@@ -182,6 +182,7 @@ static bool entity_tick(struct entity* e) {
 				.payload.boat_control.forward = forward,
 				.payload.boat_control.turn = turn,
 				.payload.boat_control.dismount = dismount,
+				.payload.boat_control.player = device,
 			});
 
 			// ride along: eyes above the hull, interpolated like the boat
@@ -487,8 +488,10 @@ static void entity_player_render(struct entity* e, mat4 view,
 	// the model's head pitch is degrees down from level.
 	float head_pitch = glm_deg(e->orient[1] - GLM_PIf / 2.0F);
 
-	struct inventory* inv
-		= windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]);
+	// this entity's own inventory container (issue #139): P2's model holds
+	// P2's item
+	struct inventory* inv = windowc_get_latest(
+		mp_player_windowc(e->data.local_player.device));
 
 	struct item_data held, helmet, chestplate, leggings, boots;
 	bool has_held = inv && inventory_get_hotbar_item(inv, &held);

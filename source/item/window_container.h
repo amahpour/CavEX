@@ -31,6 +31,11 @@
 #define WINDOWC_CRAFTING 1
 #define WINDOWC_FURNACE 2
 
+// Local split-screen player 2's base inventory (issue #139). Mirrored by the
+// server exactly like WINDOWC_INVENTORY; only exists client-side when a world
+// is entered with two local players.
+#define WINDOWC_INVENTORY_P2 3
+
 enum window_type {
 	WINDOW_TYPE_CHEST = 0,
 	WINDOW_TYPE_WORKBENCH = 1,

@@ -40,8 +40,8 @@ static bool onItemPlace(struct server_local* s, struct item_data* it,
 
 	int type = (it->id == ITEM_DOOR_WOOD) ? BLOCK_WOODEN_DOOR : BLOCK_IRON_DOOR;
 	int metadata = 0;
-	double dx = s->player.x - (where->x + 0.5);
-	double dz = s->player.z - (where->z + 0.5);
+	double dx = s->acting->x - (where->x + 0.5);
+	double dz = s->acting->z - (where->z + 0.5);
 
 	if(fabs(dx) > fabs(dz)) {
 		metadata = (dx >= 0) ? 2 : 0;

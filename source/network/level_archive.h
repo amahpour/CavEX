@@ -113,6 +113,13 @@ struct level_archive {
 };
 
 bool level_archive_create(struct level_archive* la, string_t filename);
+// Sidecar per-player archive (issue #139): opens `<world_dir>/<file>` as a
+// minimal level.dat-shaped NBT tree (Data.Player.Inventory only) so the
+// inventory read/write helpers below work on it unchanged. A missing file
+// yields a fresh empty tree — first destroy() after a write creates it, and
+// legacy worlds load with an empty inventory.
+bool level_archive_create_player_file(struct level_archive* la,
+									  string_t world_dir, const char* file);
 bool level_archive_read(struct level_archive* la, struct level_archive_tag tag,
 						void* result, size_t length);
 bool level_archive_write(struct level_archive* la, struct level_archive_tag tag,
