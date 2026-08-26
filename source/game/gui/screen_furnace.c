@@ -304,4 +304,5 @@ struct screen screen_furnace = {
 	.render2D = screen_furnace_render2D,
 	.render3D = NULL,
 	.render_world = true,
+	.render2D_fullscreen = true,
 };

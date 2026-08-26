@@ -56,6 +56,9 @@ enum input_button {
 	IB_LOOK_DOWN,
 	IB_LOOK_LEFT,
 	IB_LOOK_RIGHT,
+	// Open the on-screen Controls help dialog (keyboard F1, or a spare pad
+	// button). Handy for gamepads, whose buttons have no printed labels.
+	IB_HELP,
 	IB_COUNT,
 };
 
@@ -72,6 +75,10 @@ enum input_category {
 
 void input_init(void);
 void input_poll(void);
+// Wii only: re-issue WPAD_SetVRes once gfx_setup has picked the real screen
+// aspect — input_init runs first and latches the 802-wide default (no-op
+// concept on PC; only the Wii gfx backend calls it).
+void input_ir_vres_update(void);
 
 bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 				  enum input_category* category);
@@ -93,6 +100,12 @@ bool input_pressed_dev(enum input_button b, int device);
 bool input_released_dev(enum input_button b, int device);
 bool input_held_dev(enum input_button b, int device);
 bool input_joystick_dev(float dt, float* x, float* y, int device);
+// USB gamepad helpers for the L+R = cycle-hotbar chord (PC; false on Wii).
+// present: a joystick exists for this device. shoulders: both of this device's
+// pad shoulder buttons (its mine + place bindings) are physically held —
+// pad-only, so a keyboard/mouse ACTION1+ACTION2 never triggers the chord.
+bool input_gamepad_present(int device);
+bool input_gamepad_shoulders(int device);
 void input_pointer_enable(bool enable);
 // Re-establish the gameplay cursor lock after a window event (resize/maximize/
 // focus-gain) drops the pointer grab. No-op on Wii and while in menus.

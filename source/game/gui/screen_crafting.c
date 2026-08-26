@@ -300,4 +300,5 @@ struct screen screen_crafting = {
 	.render2D = screen_crafting_render2D,
 	.render3D = NULL,
 	.render_world = true,
+	.render2D_fullscreen = true,
 };

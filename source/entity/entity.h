@@ -84,6 +84,13 @@ struct entity {
 			// tick by player_walk_anim(); the render only samples it.
 			float walk_phase;
 			float walk_amp;
+			// Void-fall recovery: the last position the player stood on solid
+			// ground above the world floor. If they drop off the world (e.g. an
+			// islands gap) the tick snaps them back here instead of letting them
+			// fall forever. has_last_safe guards the first spawn before any
+			// ground contact.
+			vec3 last_safe_pos;
+			bool has_last_safe;
 		} local_player;
 		struct entity_item {
 			struct item_data item;
@@ -137,6 +144,12 @@ bool detect_double_tap(bool pressed, int* window);
 #define PLAYER_WALK_REF_SPEED 0.22F // blocks/tick that maps to full swing
 #define PLAYER_WALK_MAX_SWING 40.0F // limb swing amplitude cap (degrees)
 void player_walk_anim(float dist, float* phase, float* amp);
+
+// Void-fall recovery: record the last safe ground spot / snap the player back
+// when they fall out of the world. Pure (no world/entity access) so the tick can
+// call it and tests can exercise it directly. See entity_local_player.c.
+bool player_void_recover_step(vec3 pos, vec3 vel, bool on_ground, vec3 last_safe,
+							  bool* has_last_safe);
 
 void entity_item(uint32_t id, struct entity* e, bool server, void* world,
 				 struct item_data it);

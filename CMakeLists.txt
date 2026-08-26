@@ -116,6 +116,7 @@ add_executable(cavex
 				source/game/gui/screen_load_world.c
 				source/game/gui/screen_select_world.c
 				source/game/gui/screen_map.c
+				source/game/gui/screen_controls.c
 				source/game/gui/map_projection.c
 				source/game/gui/screen_inventory.c
 				source/game/gui/creative_inventory_list.c
