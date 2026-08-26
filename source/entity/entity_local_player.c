@@ -33,6 +33,11 @@
 
 #define EYE_HEIGHT 1.62F
 
+// Eye Y below which a player is treated as having fallen out of the world. All
+// worlds are built from y=0 up, so nothing legitimate is ever this low; a player
+// only reaches it by dropping through a void gap (e.g. between floating islands).
+#define VOID_RECOVER_Y -16.0F
+
 // Boat riding (issue #34): how far above the hull centre the rider's eyes sit,
 // and how close the player's feet must be to a boat centre to board it.
 #define BOAT_RIDE_HEIGHT 1.0F
@@ -86,6 +91,33 @@ void player_walk_anim(float dist, float* phase, float* amp) {
 	*amp += (target - *amp) * 0.3F;
 	if(*amp < 0.01F)
 		*amp = 0.0F;
+}
+
+// Void-fall recovery step (pure; unit-tested). When the player stands on solid
+// ground above the world floor, records `pos` as the last safe spot. When the
+// player's eye drops below VOID_RECOVER_Y (only reachable by falling out of the
+// world), rewrites `pos` to the last safe spot — or lifts it back up if none was
+// ever recorded (spawned straight into a gap) — zeroes `vel`, and returns true.
+// Returns false otherwise. Callers copy pos into pos_old on a true return so the
+// snap does not register as a huge one-tick movement.
+bool player_void_recover_step(vec3 pos, vec3 vel, bool on_ground, vec3 last_safe,
+							  bool* has_last_safe) {
+	if(on_ground && pos[1] > 0.0F) {
+		glm_vec3_copy(pos, last_safe);
+		*has_last_safe = true;
+		return false;
+	}
+
+	if(pos[1] < VOID_RECOVER_Y) {
+		if(*has_last_safe)
+			glm_vec3_copy(last_safe, pos);
+		else
+			pos[1] = 96.0F;
+		vel[0] = vel[1] = vel[2] = 0.0F;
+		return true;
+	}
+
+	return false;
 }
 
 static void liquid_aabb(struct AABB* out, struct block_info* blk_info) {
@@ -418,6 +450,18 @@ static bool entity_tick(struct entity* e) {
 			e->vel[1] = 0.3F;
 	}
 
+	// Remember the last solid-ground spot, and rescue the player if they drop
+	// off the world. Snapping e->pos rides the normal camera->server position
+	// sync (clin_update, every 50 ms), so the server's authoritative position —
+	// and thus the save — is corrected too, not just the local view. Without
+	// this a fall into the void never ends: the player accelerates downward
+	// forever (a spawn over not-yet-loaded chunks, or an islands gap) and the
+	// world saves them lost far below y=0 (2026-08-26).
+	if(player_void_recover_step(e->pos, e->vel, e->on_ground,
+							   e->data.local_player.last_safe_pos,
+							   &e->data.local_player.has_last_safe))
+		glm_vec3_copy(e->pos, e->pos_old);
+
 	// advance the third-person walk cycle by this tick's horizontal movement
 	{
 		float mdx = e->pos[0] - e->pos_old[0];
@@ -552,4 +596,5 @@ void entity_local_player(uint32_t id, struct entity* e, struct world* w) {
 	e->data.local_player.jump_held_prev = false;
 	e->data.local_player.walk_phase = 0.0F;
 	e->data.local_player.walk_amp = 0.0F;
+	e->data.local_player.has_last_safe = false;
 }
