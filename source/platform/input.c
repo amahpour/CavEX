@@ -95,6 +95,29 @@ static void input_pad_status(int device, int key, bool* pressed, bool* released,
 	pad_held[device][idx] = state;
 }
 
+// Non-consuming: is this pad code physically active right now? Reads raw GLFW
+// state WITHOUT touching pad_held, so it can be polled for the L+R hotbar chord
+// without disturbing the pressed/released edges the normal action path relies on.
+static bool input_pad_down(int device, int code) {
+	if(device < 0 || device >= INPUT_MAX_DEVICES)
+		return false;
+	int jid = GLFW_JOYSTICK_1 + device;
+	if(!glfwJoystickPresent(jid))
+		return false;
+
+	if(code >= PAD_AXIS_BASE) {
+		int m = code - PAD_AXIS_BASE, axis = m >> 1, dir = m & 1, n = 0;
+		const float* ax = glfwGetJoystickAxes(jid, &n);
+		return ax && axis < n
+			&& (dir ? ax[axis] > PAD_AXIS_DEADZONE
+					: ax[axis] < -PAD_AXIS_DEADZONE);
+	}
+
+	int b = code - PAD_BUTTON_BASE, n = 0;
+	const unsigned char* btns = glfwGetJoystickButtons(jid, &n);
+	return btns && b >= 0 && b < n && btns[b] == GLFW_PRESS;
+}
+
 void input_native_scroll(double yoffset) {
 	if(yoffset > 0)
 		input_wheel_up++;
@@ -722,6 +745,48 @@ bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 
 	return has_any;
 }
+
+#ifdef PLATFORM_PC
+// True if any PAD binding (code >= 3000) of `button` for `device` is physically
+// down. Ignores keyboard/mouse codes, so the chord below is pad-only.
+static bool input_pad_binding_down(enum input_button button, int device) {
+	const char* key = input_config_key(button, device);
+	if(!key)
+		return false;
+
+	size_t length = 8;
+	int mapping[length];
+	if(!config_read_int_array(&gstate.config_user, key, mapping, &length))
+		return false;
+
+	for(size_t k = 0; k < length; k++)
+		if(mapping[k] >= 3000 && input_pad_down(device, mapping[k]))
+			return true;
+	return false;
+}
+
+bool input_gamepad_present(int device) {
+	return device >= 0 && device < INPUT_MAX_DEVICES
+		&& glfwJoystickPresent(GLFW_JOYSTICK_1 + device);
+}
+
+bool input_gamepad_shoulders(int device) {
+	// Both shoulder buttons (the pad bindings for mine + place) held at once =
+	// the L+R hotbar chord. Pad-only + non-consuming (see input_pad_down), so a
+	// mouse LMB+RMB or the keyboard never triggers it.
+	return input_pad_binding_down(IB_ACTION1, device)
+		&& input_pad_binding_down(IB_ACTION2, device);
+}
+#else
+bool input_gamepad_present(int device) {
+	(void)device;
+	return false;
+}
+bool input_gamepad_shoulders(int device) {
+	(void)device;
+	return false;
+}
+#endif
 
 bool input_pressed_dev(enum input_button b, int device) {
 #ifdef PLATFORM_PC

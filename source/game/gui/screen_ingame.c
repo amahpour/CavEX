@@ -176,8 +176,34 @@ static void ingame_interact(int device) {
 	if(riding)
 		gstate.digging.active = false;
 
-	if(!riding && gstate.camera_hit.hit && input_pressed_dev(IB_ACTION2, device)
-	   && !gstate.digging.active) {
+	// L+R gamepad chord = cycle the hotbar forward. Pad-only (input_gamepad_
+	// shoulders ignores mouse/keyboard, and is false on Wii), so LMB+RMB is
+	// unaffected. While both shoulders are held we suppress mine + place; and
+	// when a pad is present the place press is deferred one tick so a chord that
+	// forms a tick late still cancels the stray block it would otherwise leave.
+	static bool s_pad_chord_prev[INPUT_MAX_DEVICES];
+	static bool s_place_deferred[INPUT_MAX_DEVICES];
+	bool pad = input_gamepad_present(device);
+	bool pad_chord = pad && input_gamepad_shoulders(device);
+	bool chord_forward = pad_chord && !s_pad_chord_prev[device];
+	s_pad_chord_prev[device] = pad_chord;
+
+	if(pad_chord)
+		gstate.digging.active = false; // stop any dig while chording
+
+	bool place_now;
+	if(pad) {
+		// execute a place deferred from last tick, unless the chord cancelled it
+		place_now = s_place_deferred[device] && !pad_chord;
+		s_place_deferred[device] = false;
+		// always consume the press edge; defer it only if it is not a chord
+		if(input_pressed_dev(IB_ACTION2, device) && !pad_chord)
+			s_place_deferred[device] = true;
+	} else {
+		place_now = input_pressed_dev(IB_ACTION2, device);
+	}
+
+	if(place_now && !riding && gstate.camera_hit.hit && !gstate.digging.active) {
 		svin_rpc_send(&(struct server_rpc) {
 			.type = SRPC_BLOCK_PLACE,
 			.payload.block_place.x = gstate.camera_hit.x,
@@ -275,7 +301,8 @@ static void ingame_interact(int device) {
 		if(input_released_dev(IB_ACTION1, device))
 			gstate.digging.active = false;
 	} else {
-		if(!riding && gstate.camera_hit.hit && input_held_dev(IB_ACTION1, device)
+		if(!riding && !pad_chord && gstate.camera_hit.hit
+		   && input_held_dev(IB_ACTION1, device)
 		   && time_diff_ms(gstate.digging.cooldown, time_get()) >= 250) {
 			gstate.digging.active = true;
 			gstate.digging.start = time_get();
@@ -301,7 +328,10 @@ static void ingame_interact(int device) {
 	size_t cur_slot = inventory_get_hotbar(inv);
 	bool old_item_exists = inventory_get_hotbar_item(inv, NULL);
 	bool scrolled_left = input_pressed_dev(IB_SCROLL_LEFT, device);
-	bool scrolled_right = input_pressed_dev(IB_SCROLL_RIGHT, device);
+	// The L+R gamepad chord cycles the hotbar forward, reusing the scroll path
+	// (slot advance + switch animation + SRPC_HOTBAR_SLOT) below.
+	bool scrolled_right
+		= input_pressed_dev(IB_SCROLL_RIGHT, device) || chord_forward;
 
 	if(scrolled_left || scrolled_right) {
 		size_t next_slot;

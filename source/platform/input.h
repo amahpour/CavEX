@@ -100,6 +100,12 @@ bool input_pressed_dev(enum input_button b, int device);
 bool input_released_dev(enum input_button b, int device);
 bool input_held_dev(enum input_button b, int device);
 bool input_joystick_dev(float dt, float* x, float* y, int device);
+// USB gamepad helpers for the L+R = cycle-hotbar chord (PC; false on Wii).
+// present: a joystick exists for this device. shoulders: both of this device's
+// pad shoulder buttons (its mine + place bindings) are physically held —
+// pad-only, so a keyboard/mouse ACTION1+ACTION2 never triggers the chord.
+bool input_gamepad_present(int device);
+bool input_gamepad_shoulders(int device);
 void input_pointer_enable(bool enable);
 // Re-establish the gameplay cursor lock after a window event (resize/maximize/
 // focus-gain) drops the pointer grab. No-op on Wii and while in menus.
