@@ -78,6 +78,12 @@ struct entity {
 			// instead of walking. (Named for the boat, which came first; it now
 			// holds either vehicle's id.)
 			uint32_t riding_boat_id;
+			// Walk-cycle state for the third-person player model (issue #138):
+			// phase advances with distance travelled, amp eases toward the
+			// speed-scaled swing amplitude (degrees). Advanced once per 20 Hz
+			// tick by player_walk_anim(); the render only samples it.
+			float walk_phase;
+			float walk_amp;
 		} local_player;
 		struct entity_item {
 			struct item_data item;
@@ -119,6 +125,18 @@ bool entity_local_player_block_collide(vec3 pos, struct block_info* blk_info);
 // must fall within this many ticks to toggle flight. 10 ticks ~= 0.5 s.
 #define JUMP_TAP_WINDOW 10
 bool detect_double_tap(bool pressed, int* window);
+
+// Third-person walk cycle (issue #138). Advance the swing state by one 20 Hz
+// tick given the horizontal distance moved that tick: the phase accumulates
+// PLAYER_WALK_PHASE_RATE radians per block (wrapped to 2*pi), and the amplitude
+// eases toward dist/PLAYER_WALK_REF_SPEED of the full PLAYER_WALK_MAX_SWING
+// degrees, so limbs ramp in when the player starts moving and settle back to
+// rest when they stop. The rendered limb angle is sin(phase) * amp. Pure (no
+// engine state) so it is unit-testable.
+#define PLAYER_WALK_PHASE_RATE 3.0F // rad of swing phase per block travelled
+#define PLAYER_WALK_REF_SPEED 0.22F // blocks/tick that maps to full swing
+#define PLAYER_WALK_MAX_SWING 40.0F // limb swing amplitude cap (degrees)
+void player_walk_anim(float dist, float* phase, float* amp);
 
 void entity_item(uint32_t id, struct entity* e, bool server, void* world,
 				 struct item_data it);

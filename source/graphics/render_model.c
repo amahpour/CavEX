@@ -160,7 +160,8 @@ void render_model_player(mat4 mv, float head_pitch, float head_yaw,
 						 float foot_angle, float arm_angle,
 						 struct item_data* held_item, struct item_data* helmet,
 						 struct item_data* chestplate,
-						 struct item_data* leggings, struct item_data* boots) {
+						 struct item_data* leggings, struct item_data* boots,
+						 float brightness) {
 	assert(mv);
 
 	struct item* held_item_it = held_item ? item_get(held_item) : NULL;
@@ -174,34 +175,34 @@ void render_model_player(mat4 mv, float head_pitch, float head_yaw,
 	// head
 	render_model_box(mv, (vec3) {0.0F, -4.0F, 0.0F}, (vec3) {4.0F, 0.0F, 4.0F},
 					 (vec3) {head_pitch, head_yaw, 0.0F}, (ivec2) {8, 8},
-					 (ivec3) {8, 8, 8}, 0.0F, false, 1.0F);
+					 (ivec3) {8, 8, 8}, 0.0F, false, brightness);
 	// head overlay
 	render_model_box(mv, (vec3) {0.0F, -4.0F, 0.0F}, (vec3) {4.0F, 0.0F, 4.0F},
 					 (vec3) {head_pitch, head_yaw, 0.0F}, (ivec2) {40, 8},
-					 (ivec3) {8, 8, 8}, 0.5F, false, 1.0F);
+					 (ivec3) {8, 8, 8}, 0.5F, false, brightness);
 	// body
 	render_model_box(mv, (vec3) {0.0F, -4.0F, 0.0F}, (vec3) {4.0F, 12.0F, 2.0F},
 					 (vec3) {0.0F, 0.0F, 0.0F}, (ivec2) {20, 20},
-					 (ivec3) {8, 4, 12}, 0.0F, false, 1.0F);
+					 (ivec3) {8, 4, 12}, 0.0F, false, brightness);
 	// left foot
 	render_model_box(mv, (vec3) {2.0F, -16.0F, 0.0F},
 					 (vec3) {2.0F, 12.0F, 2.0F},
 					 (vec3) {foot_angle, 0.0F, 0.0F}, (ivec2) {4, 20},
-					 (ivec3) {4, 4, 12}, 0.0F, true, 1.0F);
+					 (ivec3) {4, 4, 12}, 0.0F, true, brightness);
 	// right foot
 	render_model_box(mv, (vec3) {-2.0F, -16.0F, 0.0F},
 					 (vec3) {2.0F, 12.0F, 2.0F},
 					 (vec3) {-foot_angle, 0.0F, 0.0F}, (ivec2) {4, 20},
-					 (ivec3) {4, 4, 12}, 0.0F, false, 1.0F);
+					 (ivec3) {4, 4, 12}, 0.0F, false, brightness);
 	// left arm
 	render_model_box(mv, (vec3) {4.0F, -4.0F, 0.0F}, (vec3) {0.0F, 12.0F, 2.0F},
 					 (vec3) {arm_angle, 0.0F, 4.0F}, (ivec2) {44, 20},
-					 (ivec3) {4, 4, 12}, 0.0F, true, 1.0F);
+					 (ivec3) {4, 4, 12}, 0.0F, true, brightness);
 	// right arm
 	render_model_box(
 		mv, (vec3) {-4.0F, -4.0F, 0.0F}, (vec3) {4.0F, 12.0F, 2.0F},
 		(vec3) {(held_item_it ? -22.5F : 0.0F) - arm_angle, 0.0F, -4.0F},
-		(ivec2) {44, 20}, (ivec3) {4, 4, 12}, 0.0F, false, 1.0F);
+		(ivec2) {44, 20}, (ivec3) {4, 4, 12}, 0.0F, false, brightness);
 
 	if(held_item_it) {
 		mat4 model;
@@ -251,7 +252,7 @@ void render_model_player(mat4 mv, float head_pitch, float head_yaw,
 			render_model_box(
 				mv, (vec3) {0.0F, -4.0F, 0.0F}, (vec3) {4.0F, 0.0F, 4.0F},
 				(vec3) {head_pitch, head_yaw, 0.0F}, (ivec2) {8, 8},
-				(ivec3) {8, 8, 8}, 1.0F, false, 1.0F);
+				(ivec3) {8, 8, 8}, 1.0F, false, brightness);
 		}
 	}
 
@@ -268,12 +269,12 @@ void render_model_player(mat4 mv, float head_pitch, float head_yaw,
 		render_model_box(mv, (vec3) {4.0F, -4.0F, 0.0F},
 						 (vec3) {0.0F, 12.0F, 2.0F},
 						 (vec3) {arm_angle, 0.0F, 4.0F}, (ivec2) {44, 20},
-						 (ivec3) {4, 4, 12}, 1.0F, true, 1.0F);
+						 (ivec3) {4, 4, 12}, 1.0F, true, brightness);
 		// right arm
 		render_model_box(
 			mv, (vec3) {-4.0F, -4.0F, 0.0F}, (vec3) {4.0F, 12.0F, 2.0F},
 			(vec3) {(held_item_it ? -22.5F : 0.0F) - arm_angle, 0.0F, -4.0F},
-			(ivec2) {44, 20}, (ivec3) {4, 4, 12}, 1.0F, false, 1.0F);
+			(ivec2) {44, 20}, (ivec3) {4, 4, 12}, 1.0F, false, brightness);
 	}
 
 	if(leggings_it && leggings_it->armor.is_armor
@@ -288,12 +289,12 @@ void render_model_player(mat4 mv, float head_pitch, float head_yaw,
 		render_model_box(mv, (vec3) {2.0F, -16.0F, 0.0F},
 						 (vec3) {2.0F, 12.0F, 2.0F},
 						 (vec3) {foot_angle, 0.0F, 0.0F}, (ivec2) {4, 20},
-						 (ivec3) {4, 4, 12}, 0.5F, true, 1.0F);
+						 (ivec3) {4, 4, 12}, 0.5F, true, brightness);
 		// right leg
 		render_model_box(mv, (vec3) {-2.0F, -16.0F, 0.0F},
 						 (vec3) {2.0F, 12.0F, 2.0F},
 						 (vec3) {-foot_angle, 0.0F, 0.0F}, (ivec2) {4, 20},
-						 (ivec3) {4, 4, 12}, 0.5F, false, 1.0F);
+						 (ivec3) {4, 4, 12}, 0.5F, false, brightness);
 	}
 
 	if(boots_it && boots_it->armor.is_armor
@@ -303,12 +304,12 @@ void render_model_player(mat4 mv, float head_pitch, float head_yaw,
 		render_model_box(mv, (vec3) {2.0F, -16.0F, 0.0F},
 						 (vec3) {2.0F, 12.0F, 2.0F},
 						 (vec3) {foot_angle, 0.0F, 0.0F}, (ivec2) {4, 20},
-						 (ivec3) {4, 4, 12}, 1.0F, true, 1.0F);
+						 (ivec3) {4, 4, 12}, 1.0F, true, brightness);
 		// right leg
 		render_model_box(mv, (vec3) {-2.0F, -16.0F, 0.0F},
 						 (vec3) {2.0F, 12.0F, 2.0F},
 						 (vec3) {-foot_angle, 0.0F, 0.0F}, (ivec2) {4, 20},
-						 (ivec3) {4, 4, 12}, 1.0F, false, 1.0F);
+						 (ivec3) {4, 4, 12}, 1.0F, false, brightness);
 	}
 
 	gfx_cull_func(MODE_BACK);
