@@ -368,16 +368,41 @@ static void ingame_interact(int device) {
 }
 
 static void screen_ingame_update(struct screen* s, float dt) {
-	// Player 1 interacts from device 0 and its own aim.
-	ingame_interact(0);
+	bool two_player = gstate.num_local_players == 2 && gstate.local_player2;
+
+	// Split-screen (issue #140 follow-up): a player whose inventory overlay is
+	// open drives its GUI instead of interacting with the world; the other
+	// player keeps playing. capture_input freezes only the player in a menu, so
+	// movement/look (driven by the entity tick) also pauses for that player only.
+	if(two_player) {
+		if(gstate.local_player)
+			gstate.local_player->data.local_player.capture_input
+				= !gstate.player_inv_open[0];
+		if(gstate.local_player2)
+			gstate.local_player2->data.local_player.capture_input
+				= !gstate.player_inv_open[1];
+	}
+
+	// Player 1 (device 0): its overlay, or its world interaction.
+	if(two_player && gstate.player_inv_open[0]) {
+		if(!screen_inventory_update_owner(0, dt))
+			gstate.player_inv_open[0] = false;
+	} else {
+		ingame_interact(0);
+	}
 
 	// Split-screen player 2: swap its view-state into the canonical fields, run
-	// the same interaction from device 1, then swap player 1 back. Player 2 acts
-	// on the aim resolved during the previous frame's render pass (one-frame
-	// latency, imperceptible in play).
-	if(gstate.num_local_players == 2 && gstate.local_player2) {
+	// its overlay or the same interaction from device 1, then swap player 1
+	// back. Player 2 acts on the aim resolved during the previous frame's render
+	// pass (one-frame latency, imperceptible in play).
+	if(two_player) {
 		mp_swap_active_view();
-		ingame_interact(1);
+		if(gstate.player_inv_open[1]) {
+			if(!screen_inventory_update_owner(1, dt))
+				gstate.player_inv_open[1] = false;
+		} else {
+			ingame_interact(1);
+		}
 		mp_swap_active_view();
 	}
 
@@ -397,26 +422,45 @@ static void screen_ingame_update(struct screen* s, float dt) {
 			.payload.set_gamemode.toggle = true,
 		});
 
-	// Both modes open the SAME survival inventory screen so creative is "the
-	// same as when you hit the inventory button"; in creative that screen
-	// adds a paged all-items grab strip above the GUI (screen_inventory.c).
-	// Each local player opens their OWN inventory on their own key (issue
-	// #139); the screen takes over the whole display (couch co-op) but edits
-	// only the opener's items and reads the opener's device.
-	if(input_pressed(IB_INVENTORY)) {
+	// Opening the inventory. Single-player keeps the classic full-screen modal
+	// (screen_inventory takes over the display). Split-screen opens a per-player
+	// OVERLAY instead (issue #140 follow-up): it is drawn only into the opener's
+	// half and leaves the other player free to keep playing — so both can be in
+	// their own inventory at once. Handled AFTER the per-device interaction above
+	// so the same key press can't also be read as a close on the opening frame.
+	if(two_player) {
+		if(!gstate.player_inv_open[0] && input_pressed_dev(IB_INVENTORY, 0)) {
+			gstate.player_inv_open[0] = true;
+			screen_inventory_open_owner(0);
+		}
+		if(!gstate.player_inv_open[1] && input_pressed_dev(IB_INVENTORY, 1)) {
+			gstate.player_inv_open[1] = true;
+			screen_inventory_open_owner(1);
+		}
+	} else if(input_pressed(IB_INVENTORY)) {
 		screen_inventory_set_owner(0);
-		screen_set(&screen_inventory);
-	} else if(gstate.num_local_players >= 2
-			  && input_pressed_dev(IB_INVENTORY, 1)) {
-		screen_inventory_set_owner(1);
 		screen_set(&screen_inventory);
 	}
 
 	if(input_pressed(IB_MAP))
 		screen_set(&screen_map);
+
+	// Controls help (F1, or a spare pad button) — either player can open it.
+	if(input_pressed(IB_HELP) || input_pressed_dev(IB_HELP, 1))
+		screen_set(&screen_controls);
 }
 
 static void screen_ingame_render2D(struct screen* s, int width, int height) {
+	// Split-screen (issue #140 follow-up): if THIS view's player has its
+	// inventory overlay open, draw that instead of the HUD. This runs inside the
+	// per-view pass, so width/height are already this player's half and the
+	// overlay is confined to (and centred in) their side of the screen.
+	if(gstate.num_local_players == 2
+	   && gstate.player_inv_open[gstate.mp_active]) {
+		screen_inventory_render_owner(gstate.mp_active, width, height);
+		return;
+	}
+
 	// the swapped-in ACTIVE player's own container (issue #139): each half's
 	// hotbar, selection and icons show that player's items
 	struct inventory* inv

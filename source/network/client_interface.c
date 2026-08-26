@@ -220,6 +220,7 @@ void clin_process(struct client_rpc* call) {
 
 			// canonical fields hold player 1 again after a reset
 			gstate.mp_active = 0;
+			gstate.player_inv_open[0] = gstate.player_inv_open[1] = false;
 
 			gstate.world_loaded = false;
 			gstate.world.dimension = call->payload.world_reset.dimension;

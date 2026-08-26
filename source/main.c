@@ -127,6 +127,7 @@ int main(void) {
 	// device 1 (the player2_* bindings).
 	gstate.num_local_players = 1;
 	gstate.mp_active = 0;
+	gstate.player_inv_open[0] = gstate.player_inv_open[1] = false;
 #ifdef PLATFORM_PC
 	if(getenv("CAVEX_2P"))
 		gstate.num_local_players = 2;

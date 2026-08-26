@@ -40,6 +40,61 @@ static bool input_key_held[1024];
 #define KEY_WHEEL_DOWN 2001
 static int input_wheel_up, input_wheel_down;
 
+// USB gamepad support (SNES-style pads etc.). config_pc.json binds actions to
+// synthetic codes read from GLFW joysticks; the joystick index is the input
+// DEVICE, so player 1 uses joystick 0 and player 2 uses joystick 1 with no
+// other plumbing. A pad has one d-pad (2 axes) + buttons, so movement uses the
+// axes and the face buttons drive the look (see input_joystick_dev).
+//   3000 + n           -> joystick button n
+//   3100 + 2*axis + d  -> joystick axis `axis`, d=0 negative / d=1 positive half
+#define PAD_BUTTON_BASE 3000
+#define PAD_AXIS_BASE 3100
+#define PAD_AXIS_DEADZONE 0.5F
+// Edge state per (device, code) so polled pad input yields pressed/released like
+// the keyboard. Indexed by (code - PAD_BUTTON_BASE), covering buttons 0..99 and
+// axis half-codes 100..127.
+static bool pad_held[INPUT_MAX_DEVICES][128];
+
+// Report a synthetic pad code for `device`'s joystick, with keyboard-style edges.
+static void input_pad_status(int device, int key, bool* pressed, bool* released,
+							 bool* held) {
+	*pressed = *released = *held = false;
+	if(device < 0 || device >= INPUT_MAX_DEVICES)
+		return;
+
+	int jid = GLFW_JOYSTICK_1 + device;
+	if(!glfwJoystickPresent(jid))
+		return;
+
+	bool state = false;
+	if(key >= PAD_AXIS_BASE) {
+		int m = key - PAD_AXIS_BASE;
+		int axis = m >> 1, dir = m & 1;
+		int n = 0;
+		const float* ax = glfwGetJoystickAxes(jid, &n);
+		if(ax && axis < n)
+			state = dir ? (ax[axis] > PAD_AXIS_DEADZONE)
+						: (ax[axis] < -PAD_AXIS_DEADZONE);
+	} else {
+		int b = key - PAD_BUTTON_BASE;
+		int n = 0;
+		const unsigned char* btns = glfwGetJoystickButtons(jid, &n);
+		if(btns && b >= 0 && b < n)
+			state = btns[b] == GLFW_PRESS;
+	}
+
+	int idx = key - PAD_BUTTON_BASE;
+	if(idx < 0 || idx >= 128) {
+		*held = state;
+		return;
+	}
+	bool was = pad_held[device][idx];
+	*pressed = state && !was;
+	*released = !state && was;
+	*held = state && was;
+	pad_held[device][idx] = state;
+}
+
 void input_native_scroll(double yoffset) {
 	if(yoffset > 0)
 		input_wheel_up++;
@@ -50,6 +105,10 @@ void input_native_scroll(double yoffset) {
 void input_init() {
 	for(int k = 0; k < 1024; k++)
 		input_key_held[k] = false;
+
+	for(int d = 0; d < INPUT_MAX_DEVICES; d++)
+		for(int k = 0; k < 128; k++)
+			pad_held[d][k] = false;
 
 	input_pointer_enabled = false;
 	input_old_pointer_x = 0;
@@ -154,11 +213,17 @@ void input_native_joystick(float dt, float* dx, float* dy) {
 	}
 }
 
-// PC: one keyboard/mouse — devices are told apart by their config key set
-// (player2_*), so the native layer ignores the device index. The _dev shape
-// exists so the shared query code below can route the WPAD channel on Wii.
+// PC: keyboard/mouse devices are told apart by their config key set (player2_*),
+// so the native layer ignores the device index for those. Gamepad codes DO use
+// the device — it selects the joystick — so player 1 reads joystick 0 and
+// player 2 joystick 1. The _dev shape also lets the shared query code route the
+// WPAD channel on Wii.
 static void input_native_key_status_dev(int key, int device, bool* pressed,
 										bool* released, bool* held) {
+	if(key >= PAD_BUTTON_BASE) {
+		input_pad_status(device, key, pressed, released, held);
+		return;
+	}
 	(void)device;
 	input_native_key_status(key, pressed, released, held);
 }
@@ -801,6 +866,21 @@ bool input_joystick_dev(float dt, float* x, float* y, int device) {
 	if(device == 0) {
 		// Player 1 looks with the mouse (PC) or the joystick/IR (Wii).
 		input_native_joystick(dt, x, y);
+#ifdef PLATFORM_PC
+		// PC: also fold in a gamepad's face-button look so player 1 can play on a
+		// pad (added to the mouse delta, so mouse and pad both work). These keys
+		// are empty for a keyboard+mouse player, so nothing changes there. Same
+		// sign convention as player 2's look keys below.
+		const float ls = 0.018F;
+		if(input_held_dev(IB_LOOK_LEFT, 0))
+			*x -= ls;
+		if(input_held_dev(IB_LOOK_RIGHT, 0))
+			*x += ls;
+		if(input_held_dev(IB_LOOK_UP, 0))
+			*y += ls;
+		if(input_held_dev(IB_LOOK_DOWN, 0))
+			*y -= ls;
+#endif
 		return true;
 	}
 
@@ -823,10 +903,14 @@ bool input_joystick_dev(float dt, float* x, float* y, int device) {
 	const float look_speed = 0.018F;
 	float lx = 0.0F, ly = 0.0F;
 
+	// Sign convention must match player 1's mouse look (input_native_joystick):
+	// dx>0 turns the view right, dy>0 turns it up (camera_physics applies
+	// rx -= dx*2, ry -= dy*2). The horizontal pair used to be flipped, so
+	// player 2's Left arrow looked right and vice-versa (issue #140 follow-up).
 	if(input_held_dev(IB_LOOK_LEFT, device))
-		lx += look_speed;
-	if(input_held_dev(IB_LOOK_RIGHT, device))
 		lx -= look_speed;
+	if(input_held_dev(IB_LOOK_RIGHT, device))
+		lx += look_speed;
 	if(input_held_dev(IB_LOOK_UP, device))
 		ly += look_speed;
 	if(input_held_dev(IB_LOOK_DOWN, device))

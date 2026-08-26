@@ -65,13 +65,15 @@ const char* input_config_key(enum input_button b, int device) {
 			case IB_MAP: return "input.map";
 			case IB_TOGGLE_CREATIVE: return "input.toggle_creative";
 			case IB_CREATIVE_PAGE: return "input.creative_page";
-			// Player 1 looks with the mouse (input_native_joystick); the discrete
-			// look-keys exist only for keyboard-only devices, so they are unbound
-			// for device 0.
-			case IB_LOOK_UP:
-			case IB_LOOK_DOWN:
-			case IB_LOOK_LEFT:
-			case IB_LOOK_RIGHT: return NULL;
+			case IB_HELP: return "input.help";
+			// Player 1 looks with the mouse (input_native_joystick); these
+			// discrete look-keys ADD to that delta so player 1 can also look with
+			// a gamepad's face buttons (config_pc.json leaves them empty for a
+			// pure keyboard+mouse player, so nothing changes there).
+			case IB_LOOK_UP: return "input.player_look_up";
+			case IB_LOOK_DOWN: return "input.player_look_down";
+			case IB_LOOK_LEFT: return "input.player_look_left";
+			case IB_LOOK_RIGHT: return "input.player_look_right";
 			default: return NULL;
 		}
 	}
@@ -92,6 +94,7 @@ const char* input_config_key(enum input_button b, int device) {
 		case IB_LOOK_RIGHT: return "input.player2_look_right";
 		case IB_SCROLL_LEFT: return "input.player2_scroll_left";
 		case IB_SCROLL_RIGHT: return "input.player2_scroll_right";
+		case IB_HELP: return "input.player2_help";
 		// Player 2 drives its own inventory / window screens (issue #139).
 		case IB_INVENTORY: return "input.player2_inventory";
 		case IB_GUI_UP: return "input.player2_gui_up";

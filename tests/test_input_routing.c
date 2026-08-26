@@ -42,13 +42,15 @@ TEST(input_routing_device1_is_player2) {
 	ASSERT(key_is(IB_ACTION2, 1, "input.player2_action_right"));
 }
 
-// Look-keys: player 1 uses the mouse so they are unbound for device 0; player 2
-// (keyboard-only) gets a discrete look-key binding on device 1.
+// Look-keys: player 1 looks with the mouse, but the discrete look-keys now
+// resolve (device 0) so a gamepad's face buttons can ADD to that delta; they are
+// simply left empty in config for a keyboard+mouse player. Player 2
+// (keyboard/pad) gets its own discrete look-key binding on device 1.
 TEST(input_routing_look_keys) {
-	ASSERT(input_config_key(IB_LOOK_UP, 0) == NULL);
-	ASSERT(input_config_key(IB_LOOK_DOWN, 0) == NULL);
-	ASSERT(input_config_key(IB_LOOK_LEFT, 0) == NULL);
-	ASSERT(input_config_key(IB_LOOK_RIGHT, 0) == NULL);
+	ASSERT(key_is(IB_LOOK_UP, 0, "input.player_look_up"));
+	ASSERT(key_is(IB_LOOK_DOWN, 0, "input.player_look_down"));
+	ASSERT(key_is(IB_LOOK_LEFT, 0, "input.player_look_left"));
+	ASSERT(key_is(IB_LOOK_RIGHT, 0, "input.player_look_right"));
 
 	ASSERT(key_is(IB_LOOK_UP, 1, "input.player2_look_up"));
 	ASSERT(key_is(IB_LOOK_DOWN, 1, "input.player2_look_down"));

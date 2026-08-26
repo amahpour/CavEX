@@ -95,6 +95,12 @@ struct game_state {
 	// and `held_item_animation` above; used only when num_local_players == 2.
 	struct digging digging2;
 	struct held_anim held_item_animation2;
+	// Split-screen (issue #140 follow-up): each local player's inventory is a
+	// per-view overlay drawn into that player's own half, NOT a full-screen
+	// modal — so one player rummaging never freezes or covers the other. Index
+	// = device (0/1); only used when num_local_players == 2 (single-player still
+	// opens the standalone screen_inventory). Reset to false with mp_active.
+	bool player_inv_open[2];
 	bool world_loaded;
 };
 

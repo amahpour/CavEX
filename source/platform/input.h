@@ -56,6 +56,9 @@ enum input_button {
 	IB_LOOK_DOWN,
 	IB_LOOK_LEFT,
 	IB_LOOK_RIGHT,
+	// Open the on-screen Controls help dialog (keyboard F1, or a spare pad
+	// button). Handy for gamepads, whose buttons have no printed labels.
+	IB_HELP,
 	IB_COUNT,
 };
 
