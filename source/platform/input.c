@@ -271,6 +271,30 @@ static struct {
 static bool js_emulated_btns_prev[WPAD_LOCAL_CHANNELS][3][4];
 static bool js_emulated_btns_held[WPAD_LOCAL_CHANNELS][3][4];
 
+// IR pointer low-pass state, one per channel. Raw WPAD IR is noisy frame to
+// frame and drops out whenever the sensor bar leaves view, which reads as
+// choppy panning now that IR is the primary look control for Wiimote+Nunchuk.
+// Light smoothing only: with ABSOLUTE pointing the filter delays the aim
+// position directly, so heavy smoothing reads as lag. This knocks off jitter
+// without a perceptible delay.
+#define IR_FILTER_ALPHA 0.6F
+// Pointer travel (normalised, 0..1 from screen centre) that spans the full
+// absolute aim range. Inside this box the pointer maps straight to a view
+// angle, the way Wii Sports maps the pointer straight to a cursor.
+#define IR_AIM_BOX 0.65F
+// View offset at the edge of that box. camera.c multiplies by 2 to get radians,
+// so 0.22 is about +-25 degrees of pure "point to aim" either side of centre.
+#define IR_AIM_RANGE 0.22F
+// Past the box the pointer turns the view at a steady rate, so you can spin
+// further than the sensor bar's field of view allows.
+#define IR_EDGE_SPEED 2.0F
+static float ir_filter_x[WPAD_LOCAL_CHANNELS], ir_filter_y[WPAD_LOCAL_CHANNELS];
+static bool ir_filter_primed[WPAD_LOCAL_CHANNELS];
+// How much absolute aim offset we have already handed to the camera. Emitting
+// (want - applied) each frame turns this delta-only API into true position
+// control: errors self-correct instead of accumulating.
+static float ir_applied_x[WPAD_LOCAL_CHANNELS], ir_applied_y[WPAD_LOCAL_CHANNELS];
+
 void input_init() {
 	WPAD_Init();
 	for(int ch = 0; ch < WPAD_LOCAL_CHANNELS; ch++) {
@@ -283,6 +307,9 @@ void input_init() {
 			for(int j = 0; j < 3; j++)
 				js_emulated_btns_prev[ch][j][k]
 					= js_emulated_btns_held[ch][j][k] = false;
+
+	for(int ch = 0; ch < WPAD_LOCAL_CHANNELS; ch++)
+		ir_filter_primed[ch] = false;
 }
 
 void input_poll() {
@@ -414,6 +441,15 @@ static void input_native_key_status_dev(int key, int chan, bool* pressed,
 	if(chan < 0 || chan >= WPAD_LOCAL_CHANNELS)
 		chan = 0;
 
+	// With a Nunchuk attached the stick walks and the D-pad becomes the look
+	// control (input_native_joystick_dev), so the D-pad must not ALSO fire its
+	// movement bindings. Menu navigation survives: config.json binds the
+	// Nunchuk stick (900-903) to gui_up/down/left/right too.
+	if(key >= 0 && key <= 3 && joystick_input[chan][0].available) {
+		*pressed = *released = *held = false;
+		return;
+	}
+
 	if(key >= 900 && key < 924) {
 		int js = (key - 900) / 10;
 		int offset = (key - 900) % 10;
@@ -518,7 +554,9 @@ bool input_native_key_any(int* key) {
 	return false;
 }
 
-// temporary diagnostics: raw WPAD expansion state for the on-screen debug line
+// temporary diagnostics: raw WPAD expansion + IR state for the debug overlay.
+// num_dots is the one that matters for "pointing feels choppy": a powered
+// sensor bar is TWO dots, and anything less means the camera has lost it.
 #include <stdio.h>
 void input_debug_wpad(char* dst, size_t len) {
 	expansion_t e;
@@ -537,8 +575,15 @@ void input_debug_wpad(char* dst, size_t len) {
 		px = e.classic.rjs.pos.x;
 		py = e.classic.rjs.pos.y;
 	}
-	snprintf(dst, len, "ext=%d mag=%d ang=%d pos=%d,%d held=%08x", t, mag, ang,
-			 px, py, (unsigned)held);
+
+	struct ir_t ir;
+	WPAD_IR(WPAD_CHAN_0, &ir);
+
+	snprintf(dst, len,
+			 "ext=%d mag=%d ang=%d pos=%d,%d held=%08x | IR dots=%d val=%d "
+			 "%d,%d z=%dcm",
+			 t, mag, ang, px, py, (unsigned)held, (int)ir.num_dots, ir.valid,
+			 (int)ir.x, (int)ir.y, (int)(ir.z * 100.0F));
 }
 
 void input_pointer_enable(bool enable) { }
@@ -554,50 +599,125 @@ bool input_pointer(float* x, float* y, float* angle) {
 	return ir.valid;
 }
 
-// Per-channel camera input (issue #140): the channel's own extension stick if
-// one is live, else that channel's IR edge-pan fallback.
+// Per-channel camera input (issue #140). Look sources, combined additively:
+//   - Classic Controller right stick, if one is live
+//   - IR pointer edge-pan (smoothed)
+//   - D-pad, but ONLY when a Nunchuk is attached
+//
+// The Nunchuk stick deliberately does NOT steer the camera. It drives movement
+// (config.json binds codes 900-903 to player_forward/backward/left/right), so a
+// Wiimote+Nunchuk plays the Minecraft way: stick to walk and strafe, point or
+// D-pad to look. Before this the Nunchuk stick sat at the top of the camera
+// priority, so it and the IR pointer both did the same thing -- look -- and
+// nothing drove movement at all.
+//
+// Without a Nunchuk the D-pad still WALKS (that is the Wiimote-only layout), so
+// D-pad look is gated on the Nunchuk being present to stop it doing both.
 static void input_native_joystick_dev(float dt, float* dx, float* dy,
 									  int chan) {
 	if(chan < 0 || chan >= WPAD_LOCAL_CHANNELS)
 		chan = 0;
 
-	if(joystick_input[chan][0].available
-	   && joystick_input[chan][0].magnitude > 0.1F) {
-		*dx = joystick_input[chan][0].dx * joystick_input[chan][0].magnitude
-			* dt;
-		*dy = joystick_input[chan][0].dy * joystick_input[chan][0].magnitude
-			* dt;
-	} else if(joystick_input[chan][2].available
-			  && joystick_input[chan][2].magnitude > 0.1F) {
+	*dx = 0.0F;
+	*dy = 0.0F;
+
+	bool nunchuk = joystick_input[chan][0].available;
+
+	if(joystick_input[chan][2].available
+	   && joystick_input[chan][2].magnitude > 0.1F) {
 		*dx = joystick_input[chan][2].dx * joystick_input[chan][2].magnitude
 			* dt;
 		*dy = joystick_input[chan][2].dy * joystick_input[chan][2].magnitude
 			* dt;
 	} else {
-		// Fallback when no extension stick is available (e.g. Dolphin's
-		// emulated Wiimote, whose Nunchuk/Classic never complete the WPAD
-		// handshake): steer the camera with the IR pointer instead. Pushing
-		// the pointer outside the middle of the screen pans the view toward
-		// it, scaled by how far it is from center; the inner zone is neutral
-		// so the view doesn't drift while aiming.
+		// IR look, ABSOLUTE: the pointer's position inside a centre box maps
+		// straight to a view angle. Point somewhere and the view goes there;
+		// hold the remote still and the view is still. This is what Wii Sports
+		// does, and it is why pointing there feels solid.
+		//
+		// The two models tried before were both indirect and both felt bad:
+		// position->velocity (edge-pan) ignored everything inside its dead zone
+		// and always lagged; movement->movement (delta) floated because errors
+		// accumulated. Absolute mapping has neither problem, and it cannot
+		// drift -- so it needs no mining freeze, unlike the edge term below.
 		struct ir_t ir;
 		WPAD_IR(chan, &ir);
-		*dx = 0.0F;
-		*dy = 0.0F;
-		// Hold the view still while mining: CavEX resets dig progress whenever
-		// the targeted cell changes, so even slight edge-pan drift would keep
-		// restarting the dig and blocks would never break.
-		if(ir.valid && !input_held_dev(IB_ACTION1, chan)) {
+
+		if(!ir.valid) {
+			// Pointer lost the sensor bar. Re-prime on reacquire so the view
+			// does not snap by the whole gap.
+			ir_filter_primed[chan] = false;
+		} else {
 			float nx = ir.x / (ir.vres[0] ? ir.vres[0] : 640) * 2.0F - 1.0F;
 			float ny = ir.y / (ir.vres[1] ? ir.vres[1] : 480) * 2.0F - 1.0F;
-			float dead = 0.15F;
-			float speed = 2.0F;
-			float ax = fabsf(nx), ay = fabsf(ny);
-			if(ax > dead)
-				*dx = (nx > 0 ? 1 : -1) * (ax - dead) / (1.0F - dead) * speed * dt;
-			if(ay > dead)
-				*dy = -(ny > 0 ? 1 : -1) * (ay - dead) / (1.0F - dead) * speed * dt;
+
+			bool reprimed = !ir_filter_primed[chan];
+			if(reprimed) {
+				ir_filter_x[chan] = nx;
+				ir_filter_y[chan] = ny;
+				ir_filter_primed[chan] = true;
+			} else {
+				ir_filter_x[chan] += (nx - ir_filter_x[chan]) * IR_FILTER_ALPHA;
+				ir_filter_y[chan] += (ny - ir_filter_y[chan]) * IR_FILTER_ALPHA;
+			}
+
+			float bx = ir_filter_x[chan] / IR_AIM_BOX;
+			float by = ir_filter_y[chan] / IR_AIM_BOX;
+			if(bx > 1.0F) bx = 1.0F;
+			if(bx < -1.0F) bx = -1.0F;
+			if(by > 1.0F) by = 1.0F;
+			if(by < -1.0F) by = -1.0F;
+
+			float want_x = bx * IR_AIM_RANGE;
+			float want_y = -by * IR_AIM_RANGE;
+
+			if(reprimed) {
+				// Reacquire: adopt the current angle as the new base so the
+				// first frame back emits zero movement.
+				ir_applied_x[chan] = want_x;
+				ir_applied_y[chan] = want_y;
+			}
+
+			*dx = want_x - ir_applied_x[chan];
+			*dy = want_y - ir_applied_y[chan];
+			ir_applied_x[chan] = want_x;
+			ir_applied_y[chan] = want_y;
+
+			// Edge turning past the box. This one is a rate, so it is
+			// dt-scaled, and it is the only part that can drift -- hence it
+			// alone stays frozen while mining, where drift would keep
+			// restarting the dig.
+			if(!input_held_dev(IB_ACTION1, chan)) {
+				float ax = fabsf(ir_filter_x[chan]);
+				float ay = fabsf(ir_filter_y[chan]);
+				if(ax > IR_AIM_BOX)
+					*dx += (ir_filter_x[chan] > 0 ? 1 : -1)
+						* (ax - IR_AIM_BOX) / (1.0F - IR_AIM_BOX)
+						* IR_EDGE_SPEED * dt;
+				if(ay > IR_AIM_BOX)
+					*dy += -(ir_filter_y[chan] > 0 ? 1 : -1)
+						* (ay - IR_AIM_BOX) / (1.0F - IR_AIM_BOX)
+						* IR_EDGE_SPEED * dt;
+			}
 		}
+	}
+
+
+
+	// D-pad look. Deliberately NOT suppressed while mining, unlike the IR pan:
+	// that suppression exists to stop pointer DRIFT from restarting the dig, and
+	// a D-pad press is an intentional turn, not drift.
+	if(nunchuk) {
+		const float dpad_speed = 2.0F;
+		u32 held = WPAD_ButtonsHeld(chan);
+		if(held & WPAD_BUTTON_RIGHT)
+			*dx += dpad_speed * dt;
+		if(held & WPAD_BUTTON_LEFT)
+			*dx -= dpad_speed * dt;
+		if(held & WPAD_BUTTON_UP)
+			*dy += dpad_speed * dt;
+		if(held & WPAD_BUTTON_DOWN)
+			*dy -= dpad_speed * dt;
 	}
 }
 

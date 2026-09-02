@@ -29,3 +29,4 @@ HANDOFF.md
 # Python bytecode cache
 __pycache__/
 build_verify/
+dolphin-run.log
