@@ -60,6 +60,10 @@ void displaylist_destroy(struct displaylist* l) {
 void displaylist_reset(struct displaylist* l) {
 	assert(l && !l->finished);
 	l->index = DISPLAYLIST_CLL + 3;
+	// A list that once failed to grow is reusable again: without this the
+	// per-frame lists in render_item.c / render_block.c stayed poisoned for the
+	// rest of the session after a single transient OOM.
+	l->oom = false;
 }
 
 void displaylist_finalize(struct displaylist* l, uint16_t vtxcnt) {

@@ -281,13 +281,21 @@ static bool js_emulated_btns_held[WPAD_LOCAL_CHANNELS][3][4];
 // Pointer travel (normalised, 0..1 from screen centre) that spans the full
 // absolute aim range. Inside this box the pointer maps straight to a view
 // angle, the way Wii Sports maps the pointer straight to a cursor.
-#define IR_AIM_BOX 0.65F
-// View offset at the edge of that box. camera.c multiplies by 2 to get radians,
-// so 0.22 is about +-25 degrees of pure "point to aim" either side of centre.
-#define IR_AIM_RANGE 0.22F
+//
+// The axes are deliberately NOT symmetric. Pitch only ever needs about +-90
+// degrees, so a wide box of pure pointing suits it. Yaw has to go all the way
+// round, which pointing alone can never do -- so its box is narrow and its
+// edge-turn fast, so the view starts spinning almost as soon as you look
+// sideways instead of only when the pointer is pinned to the screen border.
+#define IR_AIM_BOX_X 0.35F
+#define IR_AIM_BOX_Y 0.65F
+// View offset at the edge of the box. camera.c multiplies by 2 to get radians.
+#define IR_AIM_RANGE_X 0.16F
+#define IR_AIM_RANGE_Y 0.22F
 // Past the box the pointer turns the view at a steady rate, so you can spin
 // further than the sensor bar's field of view allows.
-#define IR_EDGE_SPEED 2.0F
+#define IR_EDGE_SPEED_X 3.5F
+#define IR_EDGE_SPEED_Y 2.0F
 static float ir_filter_x[WPAD_LOCAL_CHANNELS], ir_filter_y[WPAD_LOCAL_CHANNELS];
 static bool ir_filter_primed[WPAD_LOCAL_CHANNELS];
 // How much absolute aim offset we have already handed to the camera. Emitting
@@ -661,15 +669,15 @@ static void input_native_joystick_dev(float dt, float* dx, float* dy,
 				ir_filter_y[chan] += (ny - ir_filter_y[chan]) * IR_FILTER_ALPHA;
 			}
 
-			float bx = ir_filter_x[chan] / IR_AIM_BOX;
-			float by = ir_filter_y[chan] / IR_AIM_BOX;
+			float bx = ir_filter_x[chan] / IR_AIM_BOX_X;
+			float by = ir_filter_y[chan] / IR_AIM_BOX_Y;
 			if(bx > 1.0F) bx = 1.0F;
 			if(bx < -1.0F) bx = -1.0F;
 			if(by > 1.0F) by = 1.0F;
 			if(by < -1.0F) by = -1.0F;
 
-			float want_x = bx * IR_AIM_RANGE;
-			float want_y = -by * IR_AIM_RANGE;
+			float want_x = bx * IR_AIM_RANGE_X;
+			float want_y = -by * IR_AIM_RANGE_Y;
 
 			if(reprimed) {
 				// Reacquire: adopt the current angle as the new base so the
@@ -690,14 +698,14 @@ static void input_native_joystick_dev(float dt, float* dx, float* dy,
 			if(!input_held_dev(IB_ACTION1, chan)) {
 				float ax = fabsf(ir_filter_x[chan]);
 				float ay = fabsf(ir_filter_y[chan]);
-				if(ax > IR_AIM_BOX)
+				if(ax > IR_AIM_BOX_X)
 					*dx += (ir_filter_x[chan] > 0 ? 1 : -1)
-						* (ax - IR_AIM_BOX) / (1.0F - IR_AIM_BOX)
-						* IR_EDGE_SPEED * dt;
-				if(ay > IR_AIM_BOX)
+						* (ax - IR_AIM_BOX_X) / (1.0F - IR_AIM_BOX_X)
+						* IR_EDGE_SPEED_X * dt;
+				if(ay > IR_AIM_BOX_Y)
 					*dy += -(ir_filter_y[chan] > 0 ? 1 : -1)
-						* (ay - IR_AIM_BOX) / (1.0F - IR_AIM_BOX)
-						* IR_EDGE_SPEED * dt;
+						* (ay - IR_AIM_BOX_Y) / (1.0F - IR_AIM_BOX_Y)
+						* IR_EDGE_SPEED_Y * dt;
 			}
 		}
 	}
