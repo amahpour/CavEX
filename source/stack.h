@@ -32,7 +32,8 @@ struct stack {
 
 void stack_create(struct stack* stk, size_t inital_size, size_t element_size);
 
-void stack_push(struct stack* stk, void* obj);
+// Returns false (and drops the element) if the stack could not grow.
+bool stack_push(struct stack* stk, void* obj);
 
 bool stack_empty(struct stack* stk);
 
