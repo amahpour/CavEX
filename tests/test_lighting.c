@@ -116,8 +116,11 @@ TEST(lighting_torch_propagates) {
 	test_blocks_init();
 	world.types[0][0][0] = BLOCK_TORCH;
 
+	struct stack queue;
+	lighting_queue_create(&queue);
 	lighting_update_at_block((struct world_modification_entry) {0, 0, 0}, true,
-							 light_world_get, light_world_set, &world);
+							 light_world_get, light_world_set, &world, &queue);
+	lighting_queue_destroy(&queue);
 
 	ASSERT((world.lights[0][0][0] >> 4) >= 14);
 	ASSERT((world.lights[1][0][0] >> 4) >= 13);

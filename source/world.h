@@ -70,6 +70,8 @@ struct world {
 	ilist_chunks2_t gpu_busy_chunks;
 	ptime_t anim_timer;
 	struct stack lighting_updates;
+	// persistent flood-fill scratch for lighting_update_at_block (client thread)
+	struct stack lighting_queue;
 	enum world_dim dimension;
 };
 

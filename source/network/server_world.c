@@ -50,6 +50,7 @@ void server_world_create(struct server_world* w, string_t level_name,
 	string_init_set(w->level_name, level_name);
 	w->dimension = dimension;
 	w->loaded_regions_length = 0;
+	lighting_queue_create(&w->lighting_queue);
 }
 
 void server_world_destroy(struct server_world* w) {
@@ -69,6 +70,7 @@ void server_world_destroy(struct server_world* w) {
 
 	dict_server_chunks_clear(w->chunks);
 	string_clear(w->level_name);
+	lighting_queue_destroy(&w->lighting_queue);
 }
 
 static bool server_chunk_get_block(void* user, c_coord_t x, w_coord_t y,
@@ -183,7 +185,7 @@ bool server_world_set_block(struct server_world* w, w_coord_t x, w_coord_t y,
 				.blk = blk,
 			},
 			w->dimension == WORLD_DIM_NETHER, server_world_light_get_block,
-			server_world_light_set_light, w);
+			server_world_light_set_light, w, &w->lighting_queue);
 
 		clin_rpc_send(&(struct client_rpc) {
 			.type = CRPC_SET_BLOCK,
