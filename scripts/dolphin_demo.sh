@@ -68,7 +68,7 @@ rm -rf "$DUMP"; mkdir -p "$DUMP" "$OUT"
 : > "$ROOT/dolphin-run.log"
 
 echo "==> Run headless Dolphin for ${SECS}s (autoplay + scripted input)"
-timeout "$SECS" dolphin-emu-nogui -p x11 -v Vulkan -e "$ROOT/CavEX.dol" \
+timeout -k 5 "$SECS" dolphin-emu-nogui -p x11 -v Vulkan -e "$ROOT/CavEX.dol" \
 	>"$ROOT/dolphin-run.log" 2>&1 || true
 
 echo "==> Collect frames"
