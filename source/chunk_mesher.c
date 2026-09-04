@@ -512,12 +512,27 @@ static void chunk_mesher_rebuild(struct block_data* bd, w_coord_t cx,
 }
 
 static void chunk_mesher_build(struct chunk_mesher_rpc* req) {
+	// Pass 1 -- count only. Fills vertices[] with the exact vertex count per
+	// display list and allocates nothing (count_only render never emits).
 	for(int k = 0; k < 13; k++) {
 		req->result.has_displist[k] = false;
-		displaylist_init(req->result.mesh + k, 64, false);
+		displaylist_init(req->result.mesh + k, 1, false);
 	}
 
 	size_t vertices[13];
+	chunk_mesher_rebuild(req->request.blocks, req->chunk->x, req->chunk->y,
+						 req->chunk->z, req->result.mesh, true, vertices);
+
+	// Pass 2 -- size each list to its EXACT vertex count, then fill it. One
+	// allocation at final size means displaylist_pos never realloc-grows. That
+	// growth (start 64 verts, x1.25 each time, then free) Swiss-cheesed the Wii
+	// heap: after enough of it there was no contiguous block left for the next
+	// mesh, so remeshes OOM'd with MEM1 nominally free -- "grass floats when you
+	// dig". Pre-sizing keeps the free space in usable pieces.
+	for(int k = 0; k < 13; k++)
+		displaylist_init(req->result.mesh + k,
+						 vertices[k] > 0 ? vertices[k] : 1, false);
+
 	chunk_mesher_rebuild(req->request.blocks, req->chunk->x, req->chunk->y,
 						 req->chunk->z, req->result.mesh, false, vertices);
 
