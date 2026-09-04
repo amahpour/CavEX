@@ -21,6 +21,7 @@
 #include "../block/blocks_data.h"
 #include "../game/game_state.h"
 #include "../network/client_interface.h"
+#include "../network/inventory_logic.h"
 #include "../network/server_local.h"
 #include "../platform/gfx.h"
 #include "entity.h"
@@ -90,24 +91,33 @@ static bool entity_server_tick(struct entity* e, struct server_local* s) {
 
 	if(e->delay_destroy > 0) {
 		e->delay_destroy--;
-	} else if(e->data.item.age >= 2 * 20
-			  && glm_vec3_distance2(
-					 e->pos,
-					 (vec3) {s->player.x, s->player.y - 0.6F, s->player.z})
-				  < glm_pow2(2.0F)) { // allow pickup after 2s
-		// TODO: case where item cannot be picked up completely
-		if(s->player.active_inventory && s->player.active_inventory->logic
-		   && s->player.active_inventory->logic->on_collect)
-			s->player.active_inventory->logic->on_collect(
-				s->player.active_inventory, &e->data.item.item);
+	} else if(e->data.item.age >= 2 * 20) { // allow pickup after 2s
+		// Collect into the NEAREST in-range local player (issue #139); in
+		// single-player player 2 has no position and this collapses to the
+		// original primary-player-only behaviour.
+		int who = pickup_nearest_player(
+			s->player.has_pos, s->player.x, s->player.y - 0.6,
+			s->player.z, s->player2.has_pos, s->player2.x,
+			s->player2.y - 0.6, s->player2.z, e->pos[0], e->pos[1],
+			e->pos[2], 2.0);
 
-		clin_rpc_send(&(struct client_rpc) {
-			.type = CRPC_PICKUP_ITEM,
-			.payload.pickup_item.entity_id = e->id,
-			.payload.pickup_item.collector_id = 0, // local player
-		});
+		if(who >= 0) {
+			struct server_player* sp = who == 1 ? &s->player2 : &s->player;
 
-		e->delay_destroy = 1;
+			// TODO: case where item cannot be picked up completely
+			if(sp->active_inventory && sp->active_inventory->logic
+			   && sp->active_inventory->logic->on_collect)
+				sp->active_inventory->logic->on_collect(sp->active_inventory,
+														&e->data.item.item);
+
+			clin_rpc_send(&(struct client_rpc) {
+				.type = CRPC_PICKUP_ITEM,
+				.payload.pickup_item.entity_id = e->id,
+				.payload.pickup_item.collector_player = who,
+			});
+
+			e->delay_destroy = 1;
+		}
 	}
 
 	return e->data.item.age >= 5 * 60 * 20; // destroy after 5 min

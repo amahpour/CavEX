@@ -104,6 +104,9 @@ add_executable(cavex_tests
 	test_region.c
 	test_region_migrate.c
 	test_firework.c
+	test_player_anim.c
+	test_void_recover.c
+	test_two_player.c
 )
 
 target_include_directories(cavex_tests PRIVATE

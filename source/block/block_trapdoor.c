@@ -103,7 +103,7 @@ static bool onItemPlace(struct server_local* s, struct item_data* it,
 	blk_info.block = &blk;
 
 	if(entity_local_player_block_collide(
-		   (vec3) {s->player.x, s->player.y, s->player.z}, &blk_info))
+		   (vec3) {s->acting->x, s->acting->y, s->acting->z}, &blk_info))
 		return false;
 
 	server_world_set_block(&s->world, where->x, where->y, where->z, blk);

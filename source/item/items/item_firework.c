@@ -38,8 +38,8 @@ static bool firework_use(struct server_local* s, struct item_data* it) {
 
 	clin_rpc_send(&(struct client_rpc) {
 		.type = CRPC_PARTICLE_BURST,
-		.payload.particle_burst.pos = {s->player.x, s->player.y + 1.0F,
-									   s->player.z},
+		.payload.particle_burst.pos = {s->acting->x, s->acting->y + 1.0F,
+									   s->acting->z},
 		.payload.particle_burst.count = FIREWORK_PARTICLE_COUNT,
 		.payload.particle_burst.tex = FIREWORK_PARTICLE_TEX,
 	});

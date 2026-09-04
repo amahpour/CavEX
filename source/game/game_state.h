@@ -63,6 +63,10 @@ struct game_state {
 	// driven from input device 1. While 1, the *2 fields stay zeroed and every
 	// existing single-player path (which uses the fields above) is untouched.
 	int num_local_players;
+	// Which local player the canonical fields currently hold (0 or 1),
+	// toggled by mp_swap_active_view(). Renderers/screens that need the
+	// active player's inventory container read it via mp_player_windowc().
+	int mp_active;
 	struct camera camera2;
 	struct camera_ray_result camera_hit2;
 	struct entity* local_player2; // CACHED; re-resolve from id after dict mutate
@@ -91,6 +95,12 @@ struct game_state {
 	// and `held_item_animation` above; used only when num_local_players == 2.
 	struct digging digging2;
 	struct held_anim held_item_animation2;
+	// Split-screen (issue #140 follow-up): each local player's inventory is a
+	// per-view overlay drawn into that player's own half, NOT a full-screen
+	// modal — so one player rummaging never freezes or covers the other. Index
+	// = device (0/1); only used when num_local_players == 2 (single-player still
+	// opens the standalone screen_inventory). Reset to false with mp_active.
+	bool player_inv_open[2];
 	bool world_loaded;
 };
 
@@ -102,5 +112,12 @@ extern struct game_state gstate;
 // local player through the existing single-player code paths; calling it twice is
 // a no-op. Defined in main.c.
 void mp_swap_active_view(void);
+
+// The window container holding `device`'s BASE inventory (issue #139):
+// device 1 -> WINDOWC_INVENTORY_P2, else WINDOWC_INVENTORY. Falls back to the
+// shared player-1 container while player 2's does not exist (single-player, or
+// before the world reset created it) so callers never see NULL in a loaded
+// world. Defined in game_state.c.
+struct window_container* mp_player_windowc(int device);
 
 #endif

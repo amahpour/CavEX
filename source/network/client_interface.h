@@ -92,6 +92,10 @@ struct client_rpc {
 			uint8_t window;
 			enum window_type type;
 			uint8_t slot_count;
+			// Local player the window belongs to (issue #139): the opener's
+			// GUI drives it and its wrapped main/hotbar slots are that
+			// player's inventory. 0 in single-player.
+			uint8_t player;
 		} window_open;
 		struct {
 			uint32_t entity_id;
@@ -105,7 +109,10 @@ struct client_rpc {
 		} spawn_boat;
 		struct {
 			uint32_t entity_id;
-			uint32_t collector_id;
+			// Local player index (0/1) whose inventory collected the item —
+			// the client flies the pickup toward that player's camera
+			// (issue #139: pickups go to the NEAREST local player).
+			uint8_t collector_player;
 		} pickup_item;
 		struct {
 			uint32_t entity_id;

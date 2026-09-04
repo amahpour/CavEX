@@ -26,10 +26,13 @@
 void render_model_box(mat4 view, vec3 position, vec3 pivot, vec3 rotation,
 					  ivec2 origin, ivec3 box, float padding, bool mirror,
 					  float brightness);
+// brightness scales the skin/armor box faces (0..1, use gfx_lookup_light for a
+// block-lit entity; the GUI paper doll passes 1.0F).
 void render_model_player(mat4 mv, float head_pitch, float head_yaw,
 						 float foot_angle, float arm_angle,
 						 struct item_data* held_item, struct item_data* helmet,
 						 struct item_data* chestplate,
-						 struct item_data* leggings, struct item_data* boots);
+						 struct item_data* leggings, struct item_data* boots,
+						 float brightness);
 
 #endif

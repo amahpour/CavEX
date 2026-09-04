@@ -162,8 +162,16 @@ bool block_place_default(struct server_local* s, struct item_data* it,
 	struct block_info blk_info = *where;
 	blk_info.block = &blk;
 
+	// A block may not be placed inside ANY local player (issue #139): the
+	// placer, and — in split-screen — the other player too, so player 2
+	// cannot entomb player 1 (or vice versa).
 	if(entity_local_player_block_collide(
 		   (vec3) {s->player.x, s->player.y, s->player.z}, &blk_info))
+		return false;
+
+	if(s->player2.has_pos
+	   && entity_local_player_block_collide(
+		   (vec3) {s->player2.x, s->player2.y, s->player2.z}, &blk_info))
 		return false;
 
 	server_world_set_block(&s->world, where->x, where->y, where->z, blk);

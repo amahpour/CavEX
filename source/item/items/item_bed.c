@@ -36,7 +36,7 @@ static bool onItemPlace(struct server_local* s, struct item_data* it,
 
 	// Player look direction (foot -> head), snapped to a cardinal axis. Uses the
 	// same yaw convention as the boat: forward = (sin(-rx), cos(-rx)).
-	float yaw = glm_rad(-(float)s->player.rx);
+	float yaw = glm_rad(-(float)s->acting->rx);
 	float fx = sinf(yaw);
 	float fz = cosf(yaw);
 

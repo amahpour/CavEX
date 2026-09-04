@@ -57,6 +57,33 @@ struct inv_slot {
 	size_t slot;
 };
 
+// Local player whose inventory this screen edits (issue #139): its input
+// device drives the GUI, its container is shown, and every RPC carries it.
+static uint8_t inv_owner;
+
+void screen_inventory_set_owner(uint8_t player) {
+	inv_owner = player;
+}
+
+// Split-screen (issue #140 follow-up): in 2-player the inventory is drawn as a
+// per-view overlay by screen_ingame, so BOTH players can have their own open at
+// once. The screen's module state is a single working set (inv_owner selects
+// whose container/keys are used); these checkpoints save/restore the per-owner
+// UI cursor around each owner's update/render so the two never clobber each
+// other. Single-player keeps using the standalone screen unchanged.
+struct inv_persist {
+	size_t selected_slot;
+	int cinv_page, cinv_sel;
+	bool pointer_has_item, pointer_available;
+	float pointer_x, pointer_y, pointer_angle;
+};
+static struct inv_persist inv_persist[2];
+
+// The owner's base-inventory window id (server mirrors P2 under window 3).
+static uint8_t inv_window(void) {
+	return inv_owner == 1 ? WINDOWC_INVENTORY_P2 : WINDOWC_INVENTORY;
+}
+
 static bool pointer_has_item;
 static bool pointer_available;
 static float pointer_x, pointer_y, pointer_angle;
@@ -72,8 +99,10 @@ static int cinv_page;
 static int cinv_sel;
 
 static bool creative_active(void) {
-	return gstate.local_player
-		&& gstate.local_player->data.local_player.creative;
+	// The owner's own gamemode (player 2 has its own creative flag).
+	struct entity* p
+		= (inv_owner == 1) ? gstate.local_player2 : gstate.local_player;
+	return p && p->data.local_player.creative;
 }
 
 // Number of strip rows that fit above the GUI in the current window, clamped.
@@ -149,26 +178,14 @@ static void cinv_send_set_picked(uint16_t id) {
 	svin_rpc_send(&(struct server_rpc) {
 		.type = SRPC_CREATIVE_SET_PICKED,
 		.payload.creative_set_picked.item_id = id,
+		.payload.creative_set_picked.player = inv_owner,
 	});
 }
 
-static void screen_inventory_reset(struct screen* s, int width, int height) {
-	input_pointer_enable(true);
-
-	if(gstate.local_player)
-		gstate.local_player->data.local_player.capture_input = false;
-
-	cinv_page = 0;
-	// In creative, open with keyboard focus already ON the grab strip so WASD /
-	// the d-pad walk the items right away (press DOWN to drop into your own
-	// slots). Survival keeps focus on the slots.
-	cinv_sel = creative_active() ? 0 : -1;
-
-	s->render3D = screen_ingame.render3D;
-
-	pointer_available = false;
-	pointer_has_item = false;
-
+// Build the slot position table + resolve the selected hotbar slot for the
+// current inv_owner. Layout is owner-independent, so this is shared working
+// state; selected_slot is checkpointed per owner by the split-screen wrappers.
+static void inv_build_slots(void) {
 	slots_index = 0;
 
 	for(int k = 0; k < INVENTORY_SIZE_MAIN; k++) {
@@ -182,7 +199,7 @@ static void screen_inventory_reset(struct screen* s, int width, int height) {
 	for(int k = 0; k < INVENTORY_SIZE_HOTBAR; k++) {
 		if(k
 		   == (int)inventory_get_hotbar(
-			   windowc_get_latest(gstate.windows[WINDOWC_INVENTORY])))
+			   windowc_get_latest(gstate.windows[inv_window()])))
 			selected_slot = slots_index;
 
 		slots[slots_index++] = (struct inv_slot) {
@@ -215,14 +232,41 @@ static void screen_inventory_reset(struct screen* s, int width, int height) {
 	};
 }
 
-static void screen_inventory_update(struct screen* s, float dt) {
-	if(input_pressed(IB_INVENTORY)) {
+static void screen_inventory_reset(struct screen* s, int width, int height) {
+	input_pointer_enable(true);
+
+	if(gstate.local_player)
+		gstate.local_player->data.local_player.capture_input = false;
+	if(gstate.local_player2)
+		gstate.local_player2->data.local_player.capture_input = false;
+
+	cinv_page = 0;
+	// In creative, open with keyboard focus already ON the grab strip so WASD /
+	// the d-pad walk the items right away (press DOWN to drop into your own
+	// slots). Survival keeps focus on the slots.
+	cinv_sel = creative_active() ? 0 : -1;
+
+	s->render3D = screen_ingame.render3D;
+
+	pointer_available = false;
+	pointer_has_item = false;
+
+	inv_build_slots();
+}
+
+// Core update shared by the standalone screen (single-player) and the
+// split-screen per-owner overlay. Returns false when the owner asked to close
+// (IB_INVENTORY): the caller does the teardown (screen switch, or clearing the
+// overlay flag) so this stays platform/mode-agnostic.
+static bool inv_update_core(float dt) {
+	if(input_pressed_dev(IB_INVENTORY, inv_owner)) {
 		svin_rpc_send(&(struct server_rpc) {
 			.type = SRPC_WINDOW_CLOSE,
-			.payload.window_close.window = WINDOWC_INVENTORY,
+			.payload.window_close.window = inv_window(),
+			.payload.window_close.player = inv_owner,
 		});
 
-		screen_set(&screen_ingame);
+		return false;
 	}
 
 	// Creative grab strip: page it, and turn a click on a strip cell into a
@@ -236,44 +280,46 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		if(cinv_sel >= cinv_page_size())
 			cinv_sel = cinv_page_size() - 1;
 
-		if(input_pressed(IB_CREATIVE_PAGE) || input_pressed(IB_SCROLL_RIGHT))
+		if(input_pressed_dev(IB_CREATIVE_PAGE, inv_owner) || input_pressed_dev(IB_SCROLL_RIGHT, inv_owner))
 			cinv_page = (cinv_page + 1) % cinv_page_count();
-		if(input_pressed(IB_SCROLL_LEFT))
+		if(input_pressed_dev(IB_SCROLL_LEFT, inv_owner))
 			cinv_page
 				= (cinv_page + cinv_page_count() - 1) % cinv_page_count();
 
 		float gpx, gpy, gpa;
-		if(input_pointer(&gpx, &gpy, &gpa)) {
+		if(inv_owner == 0 && input_pointer(&gpx, &gpy, &gpa)) {
 			int cell = cinv_cell_at(gfx_width(), gfx_height(), gpx, gpy);
 			if(cell >= 0
-			   && (input_pressed(IB_GUI_CLICK)
-				   || input_pressed(IB_GUI_CLICK_ALT))) {
+			   && (input_pressed_dev(IB_GUI_CLICK, inv_owner)
+				   || input_pressed_dev(IB_GUI_CLICK_ALT, inv_owner))) {
 				cinv_send_set_picked(
 					creative_inventory_item_id((size_t)cell));
-				return; // consumed -- do not also click a slot
+				return true; // consumed -- do not also click a slot
 			}
 		}
 	}
 
-	if(cinv_sel < 0 && input_pressed(IB_GUI_CLICK)) {
+	if(cinv_sel < 0 && input_pressed_dev(IB_GUI_CLICK, inv_owner)) {
 		uint16_t action_id;
-		if(windowc_new_action(gstate.windows[WINDOWC_INVENTORY], &action_id,
+		if(windowc_new_action(gstate.windows[inv_window()], &action_id,
 							  false, slots[selected_slot].slot)) {
 			svin_rpc_send(&(struct server_rpc) {
 				.type = SRPC_WINDOW_CLICK,
-				.payload.window_click.window = WINDOWC_INVENTORY,
+				.payload.window_click.window = inv_window(),
+				.payload.window_click.player = inv_owner,
 				.payload.window_click.action_id = action_id,
 				.payload.window_click.right_click = false,
 				.payload.window_click.slot = slots[selected_slot].slot,
 			});
 		}
-	} else if(cinv_sel < 0 && input_pressed(IB_GUI_CLICK_ALT)) {
+	} else if(cinv_sel < 0 && input_pressed_dev(IB_GUI_CLICK_ALT, inv_owner)) {
 		uint16_t action_id;
-		if(windowc_new_action(gstate.windows[WINDOWC_INVENTORY], &action_id,
+		if(windowc_new_action(gstate.windows[inv_window()], &action_id,
 							  true, slots[selected_slot].slot)) {
 			svin_rpc_send(&(struct server_rpc) {
 				.type = SRPC_WINDOW_CLICK,
-				.payload.window_click.window = WINDOWC_INVENTORY,
+				.payload.window_click.window = inv_window(),
+				.payload.window_click.player = inv_owner,
 				.payload.window_click.action_id = action_id,
 				.payload.window_click.right_click = true,
 				.payload.window_click.slot = slots[selected_slot].slot,
@@ -281,7 +327,8 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		}
 	}
 
-	pointer_available = input_pointer(&pointer_x, &pointer_y, &pointer_angle);
+	pointer_available = inv_owner == 0
+		&& input_pointer(&pointer_x, &pointer_y, &pointer_angle);
 
 	size_t slot_nearest[4]
 		= {selected_slot, selected_slot, selected_slot, selected_slot};
@@ -338,7 +385,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 		int row = cinv_sel / CINV_COLS;
 		int pc = cinv_page_count();
 
-		if(input_pressed(IB_GUI_LEFT)) {
+		if(input_pressed_dev(IB_GUI_LEFT, inv_owner)) {
 			if(col > 0) {
 				col--;
 			} else {
@@ -346,7 +393,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 				col = CINV_COLS - 1;
 			}
 		}
-		if(input_pressed(IB_GUI_RIGHT)) {
+		if(input_pressed_dev(IB_GUI_RIGHT, inv_owner)) {
 			if(col < CINV_COLS - 1) {
 				col++;
 			} else {
@@ -354,9 +401,9 @@ static void screen_inventory_update(struct screen* s, float dt) {
 				col = 0;
 			}
 		}
-		if(input_pressed(IB_GUI_UP) && row > 0)
+		if(input_pressed_dev(IB_GUI_UP, inv_owner) && row > 0)
 			row--;
-		if(input_pressed(IB_GUI_DOWN)) {
+		if(input_pressed_dev(IB_GUI_DOWN, inv_owner)) {
 			if(row < cinv_rows() - 1)
 				row++;
 			else
@@ -365,7 +412,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 
 		if(cinv_sel >= 0) {
 			cinv_sel = row * CINV_COLS + col;
-			if(input_pressed(IB_GUI_CLICK) || input_pressed(IB_GUI_CLICK_ALT)) {
+			if(input_pressed_dev(IB_GUI_CLICK, inv_owner) || input_pressed_dev(IB_GUI_CLICK_ALT, inv_owner)) {
 				size_t idx
 					= (size_t)cinv_page * cinv_page_size() + (size_t)cinv_sel;
 				if(idx < creative_inventory_count())
@@ -373,17 +420,17 @@ static void screen_inventory_update(struct screen* s, float dt) {
 			}
 		}
 	} else {
-		if(input_pressed(IB_GUI_LEFT)) {
+		if(input_pressed_dev(IB_GUI_LEFT, inv_owner)) {
 			selected_slot = slot_nearest[0];
 			pointer_has_item = false;
 		}
 
-		if(input_pressed(IB_GUI_RIGHT)) {
+		if(input_pressed_dev(IB_GUI_RIGHT, inv_owner)) {
 			selected_slot = slot_nearest[1];
 			pointer_has_item = false;
 		}
 
-		if(input_pressed(IB_GUI_UP)) {
+		if(input_pressed_dev(IB_GUI_UP, inv_owner)) {
 			// Off the top of the inventory in creative -> step into the strip.
 			if(creative_active() && slot_nearest[2] == selected_slot) {
 				cinv_sel = (cinv_rows() - 1) * CINV_COLS;
@@ -393,7 +440,7 @@ static void screen_inventory_update(struct screen* s, float dt) {
 			}
 		}
 
-		if(input_pressed(IB_GUI_DOWN)) {
+		if(input_pressed_dev(IB_GUI_DOWN, inv_owner)) {
 			selected_slot = slot_nearest[3];
 			pointer_has_item = false;
 		}
@@ -403,6 +450,76 @@ static void screen_inventory_update(struct screen* s, float dt) {
 	// the cursor rather than snapping it to the selected slot.
 	if(creative_active() && pointer_available && pointer_slot < 0)
 		pointer_has_item = true;
+
+	return true;
+}
+
+// Single-player standalone screen: run the core, and on a close request switch
+// back to the in-game screen (the classic full-screen modal behaviour).
+static void screen_inventory_update(struct screen* s, float dt) {
+	if(!inv_update_core(dt))
+		screen_set(&screen_ingame);
+}
+
+// ---- Split-screen per-owner overlay entry points (issue #140 follow-up) ----
+// screen_ingame drives these so each local player's inventory lives in its own
+// half and never blocks the other player. The module's working state is loaded
+// from / saved to the owner's checkpoint around each call.
+
+static void inv_load(uint8_t owner) {
+	inv_owner = owner;
+	selected_slot = inv_persist[owner].selected_slot;
+	cinv_page = inv_persist[owner].cinv_page;
+	cinv_sel = inv_persist[owner].cinv_sel;
+	pointer_has_item = inv_persist[owner].pointer_has_item;
+	pointer_available = inv_persist[owner].pointer_available;
+	pointer_x = inv_persist[owner].pointer_x;
+	pointer_y = inv_persist[owner].pointer_y;
+	pointer_angle = inv_persist[owner].pointer_angle;
+}
+
+static void inv_save(uint8_t owner) {
+	inv_persist[owner].selected_slot = selected_slot;
+	inv_persist[owner].cinv_page = cinv_page;
+	inv_persist[owner].cinv_sel = cinv_sel;
+	inv_persist[owner].pointer_has_item = pointer_has_item;
+	inv_persist[owner].pointer_available = pointer_available;
+	inv_persist[owner].pointer_x = pointer_x;
+	inv_persist[owner].pointer_y = pointer_y;
+	inv_persist[owner].pointer_angle = pointer_angle;
+}
+
+// Open this owner's inventory overlay: seed a fresh UI cursor and slot table.
+void screen_inventory_open_owner(uint8_t owner) {
+	inv_owner = owner;
+	cinv_page = 0;
+	cinv_sel = creative_active() ? 0 : -1;
+	pointer_available = false;
+	pointer_has_item = false;
+	pointer_x = pointer_y = pointer_angle = 0.0F;
+	inv_build_slots(); // sets selected_slot from this owner's hotbar
+	// Only player 1 owns the mouse; showing the cursor lets them click slots.
+	if(owner == 0)
+		input_pointer_enable(true);
+	inv_save(owner);
+}
+
+// One tick of this owner's overlay. Returns false if the owner closed it.
+bool screen_inventory_update_owner(uint8_t owner, float dt) {
+	inv_load(owner);
+	bool keep = inv_update_core(dt);
+	inv_save(owner);
+	if(!keep && owner == 0)
+		input_pointer_enable(false); // re-lock the mouse for player-1 gameplay
+	return keep;
+}
+
+// Draw this owner's overlay into whatever viewport is currently active (the
+// caller sets the per-view half before calling).
+static void screen_inventory_render2D(struct screen* s, int width, int height);
+void screen_inventory_render_owner(uint8_t owner, int width, int height) {
+	inv_load(owner);
+	screen_inventory_render2D(NULL, width, height);
 }
 
 // Draw the creative grab strip (page label + cells + item icons + hovered
@@ -450,7 +567,7 @@ static void cinv_render2d(int width, int height) {
 
 	// hovered item name
 	float px, py, ang;
-	if(input_pointer(&px, &py, &ang)) {
+	if(inv_owner == 0 && input_pointer(&px, &py, &ang)) {
 		int cell = cinv_cell_at(width, height, px, py);
 		if(cell >= 0) {
 			uint16_t id = creative_inventory_item_id((size_t)cell);
@@ -470,7 +587,7 @@ static void cinv_render2d(int width, int height) {
 
 static void screen_inventory_render2D(struct screen* s, int width, int height) {
 	struct inventory* inv
-		= windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]);
+		= windowc_get_latest(gstate.windows[inv_window()]);
 
 	// darken background
 	gfx_texture(false);
@@ -522,7 +639,8 @@ static void screen_inventory_render2D(struct screen* s, int width, int height) {
 			&leggings :
 			NULL,
 		inventory_get_slot(inv, INVENTORY_SLOT_ARMOR + 3, &boots) ? &boots :
-																	NULL);
+																	NULL,
+		1.0F);
 	gfx_write_buffers(true, false, false);
 	gfx_matrix_modelview(GLM_MAT4_IDENTITY);
 
@@ -604,4 +722,5 @@ struct screen screen_inventory = {
 	.render2D = screen_inventory_render2D,
 	.render3D = NULL,
 	.render_world = true,
+	.render2D_fullscreen = true,
 };

@@ -78,6 +78,19 @@ struct entity {
 			// instead of walking. (Named for the boat, which came first; it now
 			// holds either vehicle's id.)
 			uint32_t riding_boat_id;
+			// Walk-cycle state for the third-person player model (issue #138):
+			// phase advances with distance travelled, amp eases toward the
+			// speed-scaled swing amplitude (degrees). Advanced once per 20 Hz
+			// tick by player_walk_anim(); the render only samples it.
+			float walk_phase;
+			float walk_amp;
+			// Void-fall recovery: the last position the player stood on solid
+			// ground above the world floor. If they drop off the world (e.g. an
+			// islands gap) the tick snaps them back here instead of letting them
+			// fall forever. has_last_safe guards the first spawn before any
+			// ground contact.
+			vec3 last_safe_pos;
+			bool has_last_safe;
 		} local_player;
 		struct entity_item {
 			struct item_data item;
@@ -119,6 +132,24 @@ bool entity_local_player_block_collide(vec3 pos, struct block_info* blk_info);
 // must fall within this many ticks to toggle flight. 10 ticks ~= 0.5 s.
 #define JUMP_TAP_WINDOW 10
 bool detect_double_tap(bool pressed, int* window);
+
+// Third-person walk cycle (issue #138). Advance the swing state by one 20 Hz
+// tick given the horizontal distance moved that tick: the phase accumulates
+// PLAYER_WALK_PHASE_RATE radians per block (wrapped to 2*pi), and the amplitude
+// eases toward dist/PLAYER_WALK_REF_SPEED of the full PLAYER_WALK_MAX_SWING
+// degrees, so limbs ramp in when the player starts moving and settle back to
+// rest when they stop. The rendered limb angle is sin(phase) * amp. Pure (no
+// engine state) so it is unit-testable.
+#define PLAYER_WALK_PHASE_RATE 3.0F // rad of swing phase per block travelled
+#define PLAYER_WALK_REF_SPEED 0.22F // blocks/tick that maps to full swing
+#define PLAYER_WALK_MAX_SWING 40.0F // limb swing amplitude cap (degrees)
+void player_walk_anim(float dist, float* phase, float* amp);
+
+// Void-fall recovery: record the last safe ground spot / snap the player back
+// when they fall out of the world. Pure (no world/entity access) so the tick can
+// call it and tests can exercise it directly. See entity_local_player.c.
+bool player_void_recover_step(vec3 pos, vec3 vel, bool on_ground, vec3 last_safe,
+							  bool* has_last_safe);
 
 void entity_item(uint32_t id, struct entity* e, bool server, void* world,
 				 struct item_data it);
@@ -256,6 +287,14 @@ bool villager_should_spawn(int current_count, int cap,
 						   bool cell_already_populated);
 
 uint32_t entity_gen_id(dict_entity_t dict);
+
+// Fixed CLIENT-side entity id for split-screen player 2 (issue #139). The
+// server never learns this entity exists, but its own ids (entity_gen_id =
+// max-key+1 over the server dict, so 1, 2, 3, ...) share the client dict via
+// CRPC_SPAWN_*. Allocating P2 from entity_gen_id(client dict) produced id 1 —
+// the SAME id as the server's first spawned entity, whose CRPC_ENTITY_DESTROY
+// then deleted player 2 (first dig drop in 2P killed the split screen).
+#define ENTITY_ID_LOCAL_PLAYER2 0xFFFFFFFEu
 
 // Per-entity callback for entity_tick_all(). Invoked once for every entity in
 // the dict during a safe walk. Return true to mark the entity for removal; it

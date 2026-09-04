@@ -42,29 +42,44 @@
 // at once, so 64 is comfortable. Fixed-size on purpose: no heap, MEM1-friendly.
 #define VILLAGER_MAX 16
 #define VILLAGER_CELLS_MAX 64
+struct server_local;
+
+// One local player as the server sees it (issue #139). Two instances live in
+// struct server_local: `player` (the primary; owns the world/save lifecycle
+// fields) and `player2` (split-screen player 2 — a REAL player with its own
+// inventory, persisted in a player2.dat sidecar). `server` points back at the
+// owning server_local so the inventory-logic callbacks (whose inv->user is the
+// owning server_player) can reach the world.
+struct server_player {
+	struct server_local* server;
+	double x, y, z;
+	float rx, ry;
+	enum world_dim dimension; // meaningful on the primary player only
+	bool has_pos;
+	bool finished_loading; // primary player only (world load handshake)
+	// Server-authoritative creative flag (persisted via Player.gameMode).
+	// Gates instant-break and item consumption; mirrored to the client for
+	// the HUD + dig-timer feel. Survival (false) is the default. World-level:
+	// only the primary player's flag is read; player 2 follows it.
+	bool creative;
+	struct inventory inventory;
+	struct inventory* active_inventory;
+};
 
 struct server_local {
 	struct random_gen rand_src;
-	struct {
-		double x, y, z;
-		float rx, ry;
-		enum world_dim dimension;
-		bool has_pos;
-		bool finished_loading;
-		// Server-authoritative creative flag (persisted via Player.gameMode).
-		// Gates instant-break and item consumption; mirrored to the client for
-		// the HUD + dig-timer feel. Survival (false) is the default.
-		bool creative;
-		struct inventory inventory;
-		struct inventory* active_inventory;
-	} player;
-	// Local split-screen player 2 (issue #23): position only, used solely to
-	// extend chunk loading so the two players can roam apart (the tether fix).
-	// Player 2 shares player 1's inventory/save in this milestone; it is not a
-	// full server player. has_pos2 stays false in single-player, so the chunk
-	// loop below is byte-identical when there is one player.
-	double player2_x, player2_y, player2_z;
-	bool has_pos2;
+	struct server_player player;
+	// Local split-screen player 2 (issues #23/#139): a real second player —
+	// own position (extends chunk loading so the two can roam apart) and own
+	// inventory (hotbar, windows, pickups, persisted separately). has_pos
+	// stays false in single-player, so every 2-player branch collapses to the
+	// original single-player behaviour.
+	struct server_player player2;
+	// The player whose RPC is currently being processed. Set by the
+	// BLOCK_PLACE handler around block onRightClick callbacks so blocks that
+	// open windows (workbench/furnace) or drop items act on the player that
+	// clicked. Always valid; &player outside a handler.
+	struct server_player* acting;
 	struct server_world world;
 	dict_entity_t entities;
 	uint64_t world_time;
@@ -89,8 +104,11 @@ struct server_local {
 void server_local_create(struct server_local* s);
 // Signal the server thread to exit and join it (call on quit, before teardown).
 void server_local_stop(struct server_local* s);
+// `thrower`, when non-NULL, throws the item out along that player's view
+// direction (window-close drops); NULL scatters it randomly (block drops).
 struct entity* server_local_spawn_item(vec3 pos, struct item_data* it,
-									   bool throw, struct server_local* s);
+									   struct server_player* thrower,
+									   struct server_local* s);
 struct entity* server_local_spawn_boat(vec3 pos, float yaw,
 									   struct server_local* s);
 struct entity* server_local_spawn_minecart(vec3 pos, float yaw,
@@ -101,5 +119,8 @@ void server_local_spawn_block_drops(struct server_local* s,
 									struct block_info* blk_info);
 void server_local_send_inv_changes(set_inv_slot_t changes,
 								   struct inventory* inv, uint8_t window);
+// The client window id mirroring this player's BASE inventory
+// (WINDOWC_INVENTORY for the primary, WINDOWC_INVENTORY_P2 for player 2).
+uint8_t server_player_inv_window(struct server_player* sp);
 
 #endif

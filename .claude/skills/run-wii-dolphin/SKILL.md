@@ -44,14 +44,42 @@ GX, WPAD); for game-logic iteration prefer the `dev-native-pc` skill.
 
    ```bash
    cd ~/code/CavEX
+   # Log to DISK, never /tmp: /tmp is tmpfs (RAM). A faulting .dol makes Dolphin
+   # spew millions of "Invalid write" lines; an uncapped log on tmpfs grew to
+   # 5.3 GB and systemd-oomd killed the whole Claude session (2026-08-21).
+   LOG=~/.local/share/dolphin-emu/cavex_run.log; : > "$LOG"
    XDG_RUNTIME_DIR=/run/user/1000 DISPLAY=:0 \
-   nohup dolphin-emu-nogui -p x11 -v Vulkan -e ./CavEX.dol >/tmp/cavex_run.log 2>&1 &
+   nohup dolphin-emu-nogui -p x11 -v Vulkan -e ./CavEX.dol >"$LOG" 2>&1 &
+
+   # Crash watchdog (MANDATORY for unattended runs): kill Dolphin on the first
+   # emulated fault so a game bug can't flood the log + frame dumps and OOM the
+   # box. Clean CavEX play never logs "Invalid write", so this never misfires.
+   ( until { pgrep -x dolphin-emu-nog >/dev/null; } do :; done              # wait for start
+     while pgrep -x dolphin-emu-nog >/dev/null; do
+       if grep -qm1 'Invalid write to 0x' "$LOG"; then
+         echo "WATCHDOG: emulated fault -> killing Dolphin" >>"$LOG"
+         pkill -9 -x dolphin-emu-nog; break
+       fi
+       sleep 2
+     done ) &
    ```
+
+   The invalid-write signature means the .dol dereferenced NULL/garbage (on real
+   hardware it would hard-crash). Map the faulting PC with
+   `powerpc-eabi-addr2line -f -e CavEX.elf 0x<PC>` (LTO may only name the
+   enclosing function; read the disasm around the `st*` for the real store).
 
    Keyboard/mouse → emulated Wiimote mapping lives in
    `~/.config/dolphin-emu/WiimoteNew.ini`. Controls: WASD move, mouse =
    IR pointer (menus) / edge-pan look (in-game; freezes while LMB held),
    LMB mine, RMB place, Space jump, E inventory, wheel hotbar, Esc save&quit.
+
+   **Two-player (issue #140):** `[Wiimote2] Source = 1` is configured on this
+   machine (backup: `WiimoteNew.ini.bak-2p`). Player 2 keys: IJKL move,
+   arrows = IR edge-pan look, `,` mine, `.` place, Right-Shift jump,
+   `p` inventory, `u`/`o` hotbar. Pick "2 Players" on the world-select
+   screen (P1's d-pad left/right = A/D keys) — Wii splits top/bottom.
+   For scripted P2 input use a Pipe device on `[Wiimote2]` instead.
 
 4. **See the screen yourself** (no desktop screenshot tool works here):
    enable Dolphin frame dump, then Read the PNGs:

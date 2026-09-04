@@ -114,7 +114,9 @@ static void inv_post_action(struct inventory* inv, size_t slot, bool right,
 }
 
 static void inv_on_close(struct inventory* inv) {
-	struct server_local* s = inv->user;
+	// inv->user is the OWNING server_player (issue #139); drops land at that
+	// player's position and are thrown along its view.
+	struct server_player* sp = inv->user;
 
 	set_inv_slot_t changes;
 	set_inv_slot_init(changes);
@@ -130,8 +132,8 @@ static void inv_on_close(struct inventory* inv) {
 		if(item.id != 0) {
 			inventory_clear_slot(inv, k);
 			set_inv_slot_push(changes, k);
-			server_local_spawn_item(
-				(vec3) {s->player.x, s->player.y, s->player.z}, &item, true, s);
+			server_local_spawn_item((vec3) {sp->x, sp->y, sp->z}, &item, sp,
+									sp->server);
 		}
 	}
 
@@ -139,11 +141,12 @@ static void inv_on_close(struct inventory* inv) {
 	if(inventory_get_picked_item(inv, &picked_item)) {
 		inventory_clear_picked_item(inv);
 		set_inv_slot_push(changes, SPECIAL_SLOT_PICKED_ITEM);
-		server_local_spawn_item((vec3) {s->player.x, s->player.y, s->player.z},
-								&picked_item, true, s);
+		server_local_spawn_item((vec3) {sp->x, sp->y, sp->z}, &picked_item, sp,
+								sp->server);
 	}
 
-	server_local_send_inv_changes(changes, inv, WINDOWC_INVENTORY);
+	server_local_send_inv_changes(changes, inv,
+								  server_player_inv_window(sp));
 	set_inv_slot_clear(changes);
 }
 
@@ -162,7 +165,8 @@ static bool inv_on_collect(struct inventory* inv, struct item_data* item) {
 	bool success
 		= inventory_collect(inv, item, priorities,
 							sizeof(priorities) / sizeof(*priorities), changes);
-	server_local_send_inv_changes(changes, inv, WINDOWC_INVENTORY);
+	server_local_send_inv_changes(changes, inv,
+								  server_player_inv_window(inv->user));
 	set_inv_slot_clear(changes);
 
 	return success;

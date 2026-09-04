@@ -103,6 +103,8 @@ void mp_swap_active_view(void) {
 	uint32_t ti = gstate.local_player_id;
 	gstate.local_player_id = gstate.local_player2_id;
 	gstate.local_player2_id = ti;
+
+	gstate.mp_active ^= 1;
 }
 
 int main(void) {
@@ -124,6 +126,8 @@ int main(void) {
 	// (PC) enables a second local player -- vertical split, second camera, input
 	// device 1 (the player2_* bindings).
 	gstate.num_local_players = 1;
+	gstate.mp_active = 0;
+	gstate.player_inv_open[0] = gstate.player_inv_open[1] = false;
 #ifdef PLATFORM_PC
 	if(getenv("CAVEX_2P"))
 		gstate.num_local_players = 2;
@@ -444,18 +448,44 @@ int main(void) {
 		int view_count = split ? 2 : 1;
 
 		for(int view = 0; view < view_count; view++) {
-			if(view == 1) {
+			if(view == 1)
 				mp_swap_active_view(); // activate player 2
 
-				bool p2_water = false;
-				if(render_world) {
-					struct block_data b = world_get_block(
-						&gstate.world, floorf(gstate.camera.x),
-						floorf(gstate.camera.y + 0.1F), floorf(gstate.camera.z));
-					p2_water = b.type == BLOCK_WATER_FLOW
-						|| b.type == BLOCK_WATER_STILL;
-				}
-				camera_update(&gstate.camera, p2_water);
+			if(split) {
+#ifdef PLATFORM_WII
+				// Wii (issue #140): horizontal split — player 1 top, player 2
+				// bottom. Console-style: full-width 640x240 halves keep the
+				// horizontal FOV on a 4:3/16:9 TV instead of two skinny
+				// vertical slivers.
+				int half = gfx_window_height() / 2;
+				int vy = (view == 0) ? 0 : half;
+				int vh = (view == 0) ? half : gfx_window_height() - half;
+				gfx_viewport(0, vy, gfx_window_width(), vh);
+				gfx_scissor(true, 0, vy, gfx_window_width(), vh);
+#else
+				// PC: vertical split — player 1 left half, player 2 right
+				// half (widescreen monitors give each half a sane aspect).
+				int half = gfx_window_width() / 2;
+				int vx = (view == 0) ? 0 : half;
+				int vw = (view == 0) ? half : gfx_window_width() - half;
+				gfx_viewport(vx, 0, vw, gfx_window_height());
+				gfx_scissor(true, vx, 0, vw, gfx_window_height());
+#endif
+
+				// Per-view camera pass. The projection must be built while THIS
+				// view's viewport is active — camera_update reads gfx_width()/
+				// gfx_height() for the aspect, so running it before gfx_viewport
+				// bakes the full-screen aspect and visibly squashes the half.
+				// The frustum/pre-render/ray-pick re-run keeps culling and aim
+				// consistent with the corrected projection. (split implies
+				// render_world, so the world lookups are safe here.)
+				bool view_water_cam = false;
+				struct block_data vb = world_get_block(
+					&gstate.world, floorf(gstate.camera.x),
+					floorf(gstate.camera.y + 0.1F), floorf(gstate.camera.z));
+				view_water_cam = vb.type == BLOCK_WATER_FLOW
+					|| vb.type == BLOCK_WATER_STILL;
+				camera_update(&gstate.camera, view_water_cam);
 				world_pre_render(&gstate.world, &gstate.camera,
 								 gstate.camera.view);
 				struct camera* c = &gstate.camera;
@@ -464,15 +494,6 @@ int main(void) {
 								c->y + cosf(c->ry) * 4.5F,
 								c->z + cosf(c->rx) * sinf(c->ry) * 4.5F,
 								&gstate.camera_hit);
-			}
-
-			if(split) {
-				// vertical split: player 1 left half, player 2 right half
-				int half = gfx_window_width() / 2;
-				int vx = (view == 0) ? 0 : half;
-				int vw = (view == 0) ? half : gfx_window_width() - half;
-				gfx_viewport(vx, 0, vw, gfx_window_height());
-				gfx_scissor(true, vx, 0, vw, gfx_window_height());
 			}
 
 			// per-view underwater overlay flag (same camera this pass renders)
@@ -545,7 +566,8 @@ int main(void) {
 			}
 #endif
 
-			if(gstate.current_screen->render2D)
+			if(gstate.current_screen->render2D
+			   && !(split && gstate.current_screen->render2D_fullscreen))
 				gstate.current_screen->render2D(gstate.current_screen,
 												gfx_width(), gfx_height());
 		}
@@ -556,6 +578,17 @@ int main(void) {
 			mp_swap_active_view();
 			gfx_viewport_full();
 			gfx_scissor(false, 0, 0, 0, 0);
+
+			// Modal GUIs (inventory/crafting/furnace) draw ONCE over the whole
+			// screen instead of per view: update() hit-tests under the full
+			// viewport (before the view loop), and the 334-unit-tall layout
+			// does not fit a 240-unit Wii half anyway.
+			if(gstate.current_screen->render2D
+			   && gstate.current_screen->render2D_fullscreen) {
+				gfx_mode_gui();
+				gstate.current_screen->render2D(gstate.current_screen,
+												gfx_width(), gfx_height());
+			}
 		}
 
 		if(input_pressed(IB_SCREENSHOT)) {

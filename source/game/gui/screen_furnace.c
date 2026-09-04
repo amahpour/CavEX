@@ -47,11 +47,21 @@ void screen_furnace_set_windowc(uint8_t container) {
 	furnace_container = container;
 }
 
+// Local player whose GUI this window is (issue #139): its input device drives
+// the screen and its clicks are routed to it server-side.
+static uint8_t furnace_owner;
+
+void screen_furnace_set_owner(uint8_t player) {
+	furnace_owner = player;
+}
+
 static void screen_furnace_reset(struct screen* s, int width, int height) {
 	input_pointer_enable(true);
 
 	if(gstate.local_player)
 		gstate.local_player->data.local_player.capture_input = false;
+	if(gstate.local_player2)
+		gstate.local_player2->data.local_player.capture_input = false;
 
 	s->render3D = screen_ingame.render3D;
 
@@ -71,7 +81,7 @@ static void screen_furnace_reset(struct screen* s, int width, int height) {
 	for(int k = 0; k < INVENTORY_SIZE_HOTBAR; k++) {
 		if(k
 		   == (int)inventory_get_hotbar(
-			   windowc_get_latest(gstate.windows[WINDOWC_INVENTORY])))
+			   windowc_get_latest(mp_player_windowc(furnace_owner))))
 			selected_slot = slots_index;
 
 		slots[slots_index++] = (struct inv_slot) {
@@ -101,16 +111,17 @@ static void screen_furnace_reset(struct screen* s, int width, int height) {
 }
 
 static void screen_furnace_update(struct screen* s, float dt) {
-	if(input_pressed(IB_INVENTORY)) {
+	if(input_pressed_dev(IB_INVENTORY, furnace_owner)) {
 		svin_rpc_send(&(struct server_rpc) {
 			.type = SRPC_WINDOW_CLOSE,
 			.payload.window_close.window = furnace_container,
+			.payload.window_close.player = furnace_owner,
 		});
 
 		screen_set(&screen_ingame);
 	}
 
-	if(input_pressed(IB_GUI_CLICK)) {
+	if(input_pressed_dev(IB_GUI_CLICK, furnace_owner)) {
 		uint16_t action_id;
 		if(windowc_new_action(gstate.windows[furnace_container], &action_id,
 							  false, slots[selected_slot].slot)) {
@@ -120,9 +131,10 @@ static void screen_furnace_update(struct screen* s, float dt) {
 				.payload.window_click.action_id = action_id,
 				.payload.window_click.right_click = false,
 				.payload.window_click.slot = slots[selected_slot].slot,
+				.payload.window_click.player = furnace_owner,
 			});
 		}
-	} else if(input_pressed(IB_GUI_CLICK_ALT)) {
+	} else if(input_pressed_dev(IB_GUI_CLICK_ALT, furnace_owner)) {
 		uint16_t action_id;
 		if(windowc_new_action(gstate.windows[furnace_container], &action_id,
 							  true, slots[selected_slot].slot)) {
@@ -132,11 +144,13 @@ static void screen_furnace_update(struct screen* s, float dt) {
 				.payload.window_click.action_id = action_id,
 				.payload.window_click.right_click = true,
 				.payload.window_click.slot = slots[selected_slot].slot,
+				.payload.window_click.player = furnace_owner,
 			});
 		}
 	}
 
-	pointer_available = input_pointer(&pointer_x, &pointer_y, &pointer_angle);
+	pointer_available = furnace_owner == 0
+		&& input_pointer(&pointer_x, &pointer_y, &pointer_angle);
 
 	size_t slot_nearest[4]
 		= {selected_slot, selected_slot, selected_slot, selected_slot};
@@ -184,22 +198,22 @@ static void screen_furnace_update(struct screen* s, float dt) {
 		selected_slot = pointer_slot;
 		pointer_has_item = true;
 	} else {
-		if(input_pressed(IB_GUI_LEFT)) {
+		if(input_pressed_dev(IB_GUI_LEFT, furnace_owner)) {
 			selected_slot = slot_nearest[0];
 			pointer_has_item = false;
 		}
 
-		if(input_pressed(IB_GUI_RIGHT)) {
+		if(input_pressed_dev(IB_GUI_RIGHT, furnace_owner)) {
 			selected_slot = slot_nearest[1];
 			pointer_has_item = false;
 		}
 
-		if(input_pressed(IB_GUI_UP)) {
+		if(input_pressed_dev(IB_GUI_UP, furnace_owner)) {
 			selected_slot = slot_nearest[2];
 			pointer_has_item = false;
 		}
 
-		if(input_pressed(IB_GUI_DOWN)) {
+		if(input_pressed_dev(IB_GUI_DOWN, furnace_owner)) {
 			selected_slot = slot_nearest[3];
 			pointer_has_item = false;
 		}
@@ -290,4 +304,5 @@ struct screen screen_furnace = {
 	.render2D = screen_furnace_render2D,
 	.render3D = NULL,
 	.render_world = true,
+	.render2D_fullscreen = true,
 };

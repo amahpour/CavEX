@@ -32,7 +32,7 @@ static bool boat_place(struct server_local* s, struct item_data* it,
 
 	// Player look yaw (degrees, negated camera yaw) -> boat heading (radians),
 	// matching the sin(yaw)/cos(yaw) convention the entity uses.
-	float yaw = glm_rad(-(float)s->player.rx);
+	float yaw = glm_rad(-(float)s->acting->rx);
 
 	// Spawn the hull resting ON the cell floor, not embedded in it. The boat's
 	// AABB is BOAT_HEIGHT tall and centred on the entity origin, so the origin

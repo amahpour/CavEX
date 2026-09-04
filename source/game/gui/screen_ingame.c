@@ -67,8 +67,10 @@ void screen_ingame_render3D(struct screen* s, mat4 view) {
 	}
 
 	float place_lerp = 0.0F;
-	size_t slot = inventory_get_hotbar(
-		windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]));
+	// the swapped-in ACTIVE player's own container (issue #139)
+	struct inventory* inv
+		= windowc_get_latest(mp_player_windowc(gstate.mp_active));
+	size_t slot = inventory_get_hotbar(inv);
 
 	float dig_lerp
 		= time_diff_s(gstate.held_item_animation.punch.start, time_get())
@@ -104,8 +106,7 @@ void screen_ingame_render3D(struct screen* s, mat4 view) {
 	mat4 model;
 	struct item_data item;
 
-	if(inventory_get_slot(windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]),
-						  slot + INVENTORY_SLOT_HOTBAR, &item)
+	if(inventory_get_slot(inv, slot + INVENTORY_SLOT_HOTBAR, &item)
 	   && item_get(&item)) {
 		glm_translate_make(model,
 						   (vec3) {0.56F - sinf(sqrtLerpPI) * 0.4F,
@@ -162,6 +163,8 @@ void screen_ingame_render3D(struct screen* s, mat4 view) {
 // swaps player 2 into those fields before calling with device 1. The inventory /
 // hotbar is shared between local players in this milestone (Scope A).
 static void ingame_interact(int device) {
+	struct inventory* inv = windowc_get_latest(mp_player_windowc(device));
+
 	// While riding a boat the player steers instead of interacting with the
 	// world (issue #34): suppress block place/dig so a board/steer tap never
 	// also places or mines a block. This is also what keeps the board tap from
@@ -173,18 +176,44 @@ static void ingame_interact(int device) {
 	if(riding)
 		gstate.digging.active = false;
 
-	if(!riding && gstate.camera_hit.hit && input_pressed_dev(IB_ACTION2, device)
-	   && !gstate.digging.active) {
+	// L+R gamepad chord = cycle the hotbar forward. Pad-only (input_gamepad_
+	// shoulders ignores mouse/keyboard, and is false on Wii), so LMB+RMB is
+	// unaffected. While both shoulders are held we suppress mine + place; and
+	// when a pad is present the place press is deferred one tick so a chord that
+	// forms a tick late still cancels the stray block it would otherwise leave.
+	static bool s_pad_chord_prev[INPUT_MAX_DEVICES];
+	static bool s_place_deferred[INPUT_MAX_DEVICES];
+	bool pad = input_gamepad_present(device);
+	bool pad_chord = pad && input_gamepad_shoulders(device);
+	bool chord_forward = pad_chord && !s_pad_chord_prev[device];
+	s_pad_chord_prev[device] = pad_chord;
+
+	if(pad_chord)
+		gstate.digging.active = false; // stop any dig while chording
+
+	bool place_now;
+	if(pad) {
+		// execute a place deferred from last tick, unless the chord cancelled it
+		place_now = s_place_deferred[device] && !pad_chord;
+		s_place_deferred[device] = false;
+		// always consume the press edge; defer it only if it is not a chord
+		if(input_pressed_dev(IB_ACTION2, device) && !pad_chord)
+			s_place_deferred[device] = true;
+	} else {
+		place_now = input_pressed_dev(IB_ACTION2, device);
+	}
+
+	if(place_now && !riding && gstate.camera_hit.hit && !gstate.digging.active) {
 		svin_rpc_send(&(struct server_rpc) {
 			.type = SRPC_BLOCK_PLACE,
 			.payload.block_place.x = gstate.camera_hit.x,
 			.payload.block_place.y = gstate.camera_hit.y,
 			.payload.block_place.z = gstate.camera_hit.z,
 			.payload.block_place.side = gstate.camera_hit.side,
+			.payload.block_place.player = device,
 		});
 
-		if(inventory_get_hotbar_item(
-			   windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), NULL)) {
+		if(inventory_get_hotbar_item(inv, NULL)) {
 			gstate.held_item_animation.punch.start = time_get();
 			gstate.held_item_animation.punch.place = true;
 		}
@@ -199,8 +228,7 @@ static void ingame_interact(int device) {
 			= world_get_block(&gstate.world, gstate.digging.x, gstate.digging.y,
 							  gstate.digging.z);
 		struct item_data it;
-		inventory_get_hotbar_item(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), &it);
+		inventory_get_hotbar_item(inv, &it);
 		int delay = blocks[blk.type] ?
 			tool_dig_delay_ms(blocks[blk.type], item_get(&it), creative) :
 			0;
@@ -220,6 +248,7 @@ static void ingame_interact(int device) {
 				.payload.block_dig.z = gstate.digging.z,
 				.payload.block_dig.side = gstate.camera_hit.side,
 				.payload.block_dig.finished = false,
+				.payload.block_dig.player = device,
 			});
 		}
 
@@ -245,6 +274,7 @@ static void ingame_interact(int device) {
 					.payload.block_dig.z = gstate.digging.z,
 					.payload.block_dig.side = gstate.camera_hit.side,
 					.payload.block_dig.finished = true,
+					.payload.block_dig.player = device,
 				});
 
 				gstate.digging.cooldown = time_get();
@@ -261,6 +291,7 @@ static void ingame_interact(int device) {
 				.payload.block_dig.z = gstate.digging.z,
 				.payload.block_dig.side = gstate.camera_hit.side,
 				.payload.block_dig.finished = true,
+				.payload.block_dig.player = device,
 			});
 
 			gstate.digging.cooldown = time_get();
@@ -270,7 +301,8 @@ static void ingame_interact(int device) {
 		if(input_released_dev(IB_ACTION1, device))
 			gstate.digging.active = false;
 	} else {
-		if(!riding && gstate.camera_hit.hit && input_held_dev(IB_ACTION1, device)
+		if(!riding && !pad_chord && gstate.camera_hit.hit
+		   && input_held_dev(IB_ACTION1, device)
 		   && time_diff_ms(gstate.digging.cooldown, time_get()) >= 250) {
 			gstate.digging.active = true;
 			gstate.digging.start = time_get();
@@ -285,8 +317,51 @@ static void ingame_interact(int device) {
 				.payload.block_dig.z = gstate.digging.z,
 				.payload.block_dig.side = gstate.camera_hit.side,
 				.payload.block_dig.finished = false,
+				.payload.block_dig.player = device,
 			});
 		}
+	}
+
+	// Hotbar scroll for THIS player (issue #139): own keys (device), own
+	// container, own switch animation (the caller swapped the active player's
+	// anim state into the canonical field).
+	size_t cur_slot = inventory_get_hotbar(inv);
+	bool old_item_exists = inventory_get_hotbar_item(inv, NULL);
+	bool scrolled_left = input_pressed_dev(IB_SCROLL_LEFT, device);
+	// The L+R gamepad chord cycles the hotbar forward, reusing the scroll path
+	// (slot advance + switch animation + SRPC_HOTBAR_SLOT) below.
+	bool scrolled_right
+		= input_pressed_dev(IB_SCROLL_RIGHT, device) || chord_forward;
+
+	if(scrolled_left || scrolled_right) {
+		size_t next_slot;
+		if(scrolled_left)
+			next_slot = (cur_slot == 0) ? INVENTORY_SIZE_HOTBAR - 1 :
+										  cur_slot - 1;
+		else
+			next_slot = (cur_slot == INVENTORY_SIZE_HOTBAR - 1) ?
+				0 :
+				cur_slot + 1;
+
+		inventory_set_hotbar(inv, next_slot);
+		bool new_item_exists = inventory_get_hotbar_item(inv, NULL);
+
+		if(time_diff_s(gstate.held_item_animation.switch_item.start,
+					   time_get())
+			   >= 0.15F
+		   && (old_item_exists || new_item_exists)) {
+			gstate.held_item_animation.switch_item.start = time_get();
+			gstate.held_item_animation.switch_item.old_slot = cur_slot;
+		}
+
+		if(gstate.digging.active)
+			gstate.digging.start = time_get();
+
+		svin_rpc_send(&(struct server_rpc) {
+			.type = SRPC_HOTBAR_SLOT,
+			.payload.hotbar_slot.slot = next_slot,
+			.payload.hotbar_slot.player = device,
+		});
 	}
 
 	if(input_held_dev(IB_ACTION1, device)
@@ -323,72 +398,45 @@ static void ingame_interact(int device) {
 }
 
 static void screen_ingame_update(struct screen* s, float dt) {
-	// Player 1 interacts from device 0 and its own aim.
-	ingame_interact(0);
+	bool two_player = gstate.num_local_players == 2 && gstate.local_player2;
+
+	// Split-screen (issue #140 follow-up): a player whose inventory overlay is
+	// open drives its GUI instead of interacting with the world; the other
+	// player keeps playing. capture_input freezes only the player in a menu, so
+	// movement/look (driven by the entity tick) also pauses for that player only.
+	if(two_player) {
+		if(gstate.local_player)
+			gstate.local_player->data.local_player.capture_input
+				= !gstate.player_inv_open[0];
+		if(gstate.local_player2)
+			gstate.local_player2->data.local_player.capture_input
+				= !gstate.player_inv_open[1];
+	}
+
+	// Player 1 (device 0): its overlay, or its world interaction.
+	if(two_player && gstate.player_inv_open[0]) {
+		if(!screen_inventory_update_owner(0, dt))
+			gstate.player_inv_open[0] = false;
+	} else {
+		ingame_interact(0);
+	}
 
 	// Split-screen player 2: swap its view-state into the canonical fields, run
-	// the same interaction from device 1, then swap player 1 back. Player 2 acts
-	// on the aim resolved during the previous frame's render pass (one-frame
-	// latency, imperceptible in play).
-	if(gstate.num_local_players == 2 && gstate.local_player2) {
+	// its overlay or the same interaction from device 1, then swap player 1
+	// back. Player 2 acts on the aim resolved during the previous frame's render
+	// pass (one-frame latency, imperceptible in play).
+	if(two_player) {
 		mp_swap_active_view();
-		ingame_interact(1);
+		if(gstate.player_inv_open[1]) {
+			if(!screen_inventory_update_owner(1, dt))
+				gstate.player_inv_open[1] = false;
+		} else {
+			ingame_interact(1);
+		}
 		mp_swap_active_view();
 	}
 
-	// The remainder is player-1 only: hotbar scroll, menu, inventory, map. Player 2
-	// has no scroll/menu bindings in this milestone and the inventory is shared.
-	size_t slot = inventory_get_hotbar(
-		windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]));
-	bool old_item_exists = inventory_get_hotbar_item(
-		windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), NULL);
-
-	if(input_pressed(IB_SCROLL_LEFT)) {
-		size_t next_slot = (slot == 0) ? INVENTORY_SIZE_HOTBAR - 1 : slot - 1;
-		inventory_set_hotbar(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), next_slot);
-		bool new_item_exists = inventory_get_hotbar_item(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), NULL);
-
-		if(time_diff_s(gstate.held_item_animation.switch_item.start, time_get())
-			   >= 0.15F
-		   && (old_item_exists || new_item_exists)) {
-			gstate.held_item_animation.switch_item.start = time_get();
-			gstate.held_item_animation.switch_item.old_slot = slot;
-		}
-
-		if(gstate.digging.active)
-			gstate.digging.start = time_get();
-
-		svin_rpc_send(&(struct server_rpc) {
-			.type = SRPC_HOTBAR_SLOT,
-			.payload.hotbar_slot.slot = next_slot,
-		});
-	}
-
-	if(input_pressed(IB_SCROLL_RIGHT)) {
-		size_t next_slot = (slot == INVENTORY_SIZE_HOTBAR - 1) ? 0 : slot + 1;
-		inventory_set_hotbar(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), next_slot);
-		bool new_item_exists = inventory_get_hotbar_item(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), NULL);
-
-		if(time_diff_s(gstate.held_item_animation.switch_item.start, time_get())
-			   >= 0.15F
-		   && (old_item_exists || new_item_exists)) {
-			gstate.held_item_animation.switch_item.start = time_get();
-			gstate.held_item_animation.switch_item.old_slot = slot;
-		}
-
-		if(gstate.digging.active)
-			gstate.digging.start = time_get();
-
-		svin_rpc_send(&(struct server_rpc) {
-			.type = SRPC_HOTBAR_SLOT,
-			.payload.hotbar_slot.slot = next_slot,
-		});
-	}
-
+	// World-level buttons stay player-1: save&quit, creative toggle, map.
 	if(input_pressed(IB_HOME)) {
 		screen_set(&screen_select_world);
 		svin_rpc_send(&(struct server_rpc) {
@@ -404,17 +452,49 @@ static void screen_ingame_update(struct screen* s, float dt) {
 			.payload.set_gamemode.toggle = true,
 		});
 
-	if(input_pressed(IB_INVENTORY))
-		// Both modes open the SAME survival inventory screen so creative is "the
-		// same as when you hit the inventory button"; in creative that screen
-		// adds a paged all-items grab strip above the GUI (screen_inventory.c).
+	// Opening the inventory. Single-player keeps the classic full-screen modal
+	// (screen_inventory takes over the display). Split-screen opens a per-player
+	// OVERLAY instead (issue #140 follow-up): it is drawn only into the opener's
+	// half and leaves the other player free to keep playing — so both can be in
+	// their own inventory at once. Handled AFTER the per-device interaction above
+	// so the same key press can't also be read as a close on the opening frame.
+	if(two_player) {
+		if(!gstate.player_inv_open[0] && input_pressed_dev(IB_INVENTORY, 0)) {
+			gstate.player_inv_open[0] = true;
+			screen_inventory_open_owner(0);
+		}
+		if(!gstate.player_inv_open[1] && input_pressed_dev(IB_INVENTORY, 1)) {
+			gstate.player_inv_open[1] = true;
+			screen_inventory_open_owner(1);
+		}
+	} else if(input_pressed(IB_INVENTORY)) {
+		screen_inventory_set_owner(0);
 		screen_set(&screen_inventory);
+	}
 
 	if(input_pressed(IB_MAP))
 		screen_set(&screen_map);
+
+	// Controls help (F1, or a spare pad button) — either player can open it.
+	if(input_pressed(IB_HELP) || input_pressed_dev(IB_HELP, 1))
+		screen_set(&screen_controls);
 }
 
 static void screen_ingame_render2D(struct screen* s, int width, int height) {
+	// Split-screen (issue #140 follow-up): if THIS view's player has its
+	// inventory overlay open, draw that instead of the HUD. This runs inside the
+	// per-view pass, so width/height are already this player's half and the
+	// overlay is confined to (and centred in) their side of the screen.
+	if(gstate.num_local_players == 2
+	   && gstate.player_inv_open[gstate.mp_active]) {
+		screen_inventory_render_owner(gstate.mp_active, width, height);
+		return;
+	}
+
+	// the swapped-in ACTIVE player's own container (issue #139): each half's
+	// hotbar, selection and icons show that player's items
+	struct inventory* inv
+		= windowc_get_latest(mp_player_windowc(gstate.mp_active));
 	char str[64];
 	sprintf(str, GAME_NAME " Alpha %i.%i.%i (impl. B1.7.3)", VERSION_MAJOR,
 			VERSION_MINOR, VERSION_PATCH);
@@ -455,8 +535,7 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 			= world_get_block(&gstate.world, gstate.digging.x,
 							  gstate.digging.y, gstate.digging.z);
 		struct item_data dit;
-		inventory_get_hotbar_item(
-			windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]), &dit);
+		inventory_get_hotbar_item(inv, &dit);
 		bool dcreative = gstate.local_player
 			&& gstate.local_player->data.local_player.creative;
 		int ddelay = blocks[dblk.type] ?
@@ -511,9 +590,7 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 							  gstate.camera_hit.y, gstate.camera_hit.z);
 		if(blocks[bd.type] && blocks[bd.type]->onRightClick) {
 			icon_offset += gutil_control_icon(icon_offset, IB_ACTION2, "Use");
-		} else if(inventory_get_hotbar_item(
-					  windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]),
-					  &item)
+		} else if(inventory_get_hotbar_item(inv, &item)
 				  && item_get(&item)) {
 			icon_offset
 				+= gutil_control_icon(icon_offset, IB_ACTION2,
@@ -540,9 +617,7 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 
 	for(int k = 0; k < INVENTORY_SIZE_HOTBAR; k++) {
 		struct item_data item;
-		if(inventory_get_slot(
-			   windowc_get_latest(gstate.windows[WINDOWC_INVENTORY]),
-			   k + INVENTORY_SLOT_HOTBAR, &item))
+		if(inventory_get_slot(inv, k + INVENTORY_SLOT_HOTBAR, &item))
 			gutil_draw_item(&item, (width - 182 * 2) / 2 + 3 * 2 + 20 * 2 * k,
 							height - 32 * 8 / 5 - 19 * 2, 0);
 	}
@@ -552,9 +627,7 @@ static void screen_ingame_render2D(struct screen* s, int width, int height) {
 
 	// draw hotbar selection
 	gutil_texquad((width - 182 * 2) / 2 - 2
-					  + 20 * 2
-						  * inventory_get_hotbar(windowc_get_latest(
-							  gstate.windows[WINDOWC_INVENTORY])),
+					  + 20 * 2 * inventory_get_hotbar(inv),
 				  height - 32 * 8 / 5 - 23 * 2, 208, 0, 24, 24, 24 * 2, 24 * 2);
 
 	// The hearts are purely cosmetic (CavEX has no health system). In creative

@@ -23,7 +23,20 @@
 #include "../platform/input.h"
 #include "entity.h"
 
+#ifndef CAVEX_TEST_BUILD
+// Render-only dependencies; the unit-test build (no GL) compiles this file too,
+// so anything that pulls platform/gfx.h stays behind the guard, exactly like
+// entity_villager.c.
+#include "../graphics/render_item.h"
+#include "../graphics/render_model.h"
+#endif
+
 #define EYE_HEIGHT 1.62F
+
+// Eye Y below which a player is treated as having fallen out of the world. All
+// worlds are built from y=0 up, so nothing legitimate is ever this low; a player
+// only reaches it by dropping through a void gap (e.g. between floating islands).
+#define VOID_RECOVER_Y -16.0F
 
 // Boat riding (issue #34): how far above the hull centre the rider's eyes sit,
 // and how close the player's feet must be to a boat centre to board it.
@@ -56,6 +69,54 @@ bool detect_double_tap(bool pressed, int* window) {
 	}
 
 	*window = JUMP_TAP_WINDOW; // first tap -> open the window
+	return false;
+}
+
+// Pure walk-cycle step — see declaration in entity.h. Keeps no engine state so
+// it can be unit-tested in isolation (tests/test_player_anim.c).
+void player_walk_anim(float dist, float* phase, float* amp) {
+	if(dist < 0.0F)
+		dist = 0.0F;
+
+	*phase += dist * PLAYER_WALK_PHASE_RATE;
+	if(*phase >= GLM_PIf * 2.0F)
+		*phase -= floorf(*phase / (GLM_PIf * 2.0F)) * GLM_PIf * 2.0F;
+
+	float target = dist / PLAYER_WALK_REF_SPEED;
+	if(target > 1.0F)
+		target = 1.0F;
+	target *= PLAYER_WALK_MAX_SWING;
+
+	// ease so limbs ramp in/out instead of snapping between rest and full swing
+	*amp += (target - *amp) * 0.3F;
+	if(*amp < 0.01F)
+		*amp = 0.0F;
+}
+
+// Void-fall recovery step (pure; unit-tested). When the player stands on solid
+// ground above the world floor, records `pos` as the last safe spot. When the
+// player's eye drops below VOID_RECOVER_Y (only reachable by falling out of the
+// world), rewrites `pos` to the last safe spot — or lifts it back up if none was
+// ever recorded (spawned straight into a gap) — zeroes `vel`, and returns true.
+// Returns false otherwise. Callers copy pos into pos_old on a true return so the
+// snap does not register as a huge one-tick movement.
+bool player_void_recover_step(vec3 pos, vec3 vel, bool on_ground, vec3 last_safe,
+							  bool* has_last_safe) {
+	if(on_ground && pos[1] > 0.0F) {
+		glm_vec3_copy(pos, last_safe);
+		*has_last_safe = true;
+		return false;
+	}
+
+	if(pos[1] < VOID_RECOVER_Y) {
+		if(*has_last_safe)
+			glm_vec3_copy(last_safe, pos);
+		else
+			pos[1] = 96.0F;
+		vel[0] = vel[1] = vel[2] = 0.0F;
+		return true;
+	}
+
 	return false;
 }
 
@@ -153,6 +214,7 @@ static bool entity_tick(struct entity* e) {
 				.payload.boat_control.forward = forward,
 				.payload.boat_control.turn = turn,
 				.payload.boat_control.dismount = dismount,
+				.payload.boat_control.player = device,
 			});
 
 			// ride along: eyes above the hull, interpolated like the boat
@@ -163,6 +225,10 @@ static bool entity_tick(struct entity* e) {
 
 			// keep the flight double-tap from arming on the dismount tap
 			e->data.local_player.jump_tap_window = 0;
+
+			// riding: feet are still — let the walk swing ease back to rest
+			player_walk_anim(0.0F, &e->data.local_player.walk_phase,
+							 &e->data.local_player.walk_amp);
 
 			if(dismount)
 				e->data.local_player.riding_boat_id = 0;
@@ -384,6 +450,27 @@ static bool entity_tick(struct entity* e) {
 			e->vel[1] = 0.3F;
 	}
 
+	// Remember the last solid-ground spot, and rescue the player if they drop
+	// off the world. Snapping e->pos rides the normal camera->server position
+	// sync (clin_update, every 50 ms), so the server's authoritative position —
+	// and thus the save — is corrected too, not just the local view. Without
+	// this a fall into the void never ends: the player accelerates downward
+	// forever (a spawn over not-yet-loaded chunks, or an islands gap) and the
+	// world saves them lost far below y=0 (2026-08-26).
+	if(player_void_recover_step(e->pos, e->vel, e->on_ground,
+							   e->data.local_player.last_safe_pos,
+							   &e->data.local_player.has_last_safe))
+		glm_vec3_copy(e->pos, e->pos_old);
+
+	// advance the third-person walk cycle by this tick's horizontal movement
+	{
+		float mdx = e->pos[0] - e->pos_old[0];
+		float mdz = e->pos[2] - e->pos_old[2];
+		player_walk_anim(sqrtf(mdx * mdx + mdz * mdz),
+						 &e->data.local_player.walk_phase,
+						 &e->data.local_player.walk_amp);
+	}
+
 	return false;
 }
 
@@ -397,13 +484,105 @@ bool entity_local_player_block_collide(vec3 pos, struct block_info* blk_info) {
 	return entity_block_aabb_test(&bbox, blk_info);
 }
 
+#ifndef CAVEX_TEST_BUILD
+// The classic player model is authored in 1/16-block units, 32 px tall with its
+// origin 28 px above the feet (render_model_player boxes: legs -28..-16, body
+// -16..-4, head -4..+4). Minecraft draws it at 0.9375 scale so the 32 px model
+// reads as the 1.8-block player; entity pos is the EYE (EYE_HEIGHT above feet).
+#define PLAYER_MODEL_SCALE (0.9375F / 16.0F)
+#define PLAYER_MODEL_ORIGIN_Y (28.0F * PLAYER_MODEL_SCALE - EYE_HEIGHT)
+
+// Third-person player model (issue #138). Drawn for every local-player entity
+// EXCEPT the one whose eyes the active viewport looks through — in the split-
+// screen render pass mp_swap_active_view() has made that player the canonical
+// gstate.local_player, so comparing ids draws only the OTHER player in each
+// half. Single-player: the only player entity is always the active one, so
+// nothing is ever drawn and rendering is unchanged.
+static void entity_player_render(struct entity* e, mat4 view,
+								 float tick_delta) {
+	if(gstate.local_player && e->id == gstate.local_player_id)
+		return;
+
+	vec3 pos_lerp;
+	glm_vec3_lerp(e->pos_old, e->pos, tick_delta, pos_lerp);
+
+	// brightness from the block the head is in (same sampling as dropped
+	// items). Floored so the other player never disappears into pure black —
+	// an unlit cave (or a not-yet-loaded chunk, which reads as light 0) keeps
+	// a faint silhouette you can still find.
+	struct block_data in_block;
+	entity_get_block(e, floorf(pos_lerp[0]), floorf(pos_lerp[1]),
+					 floorf(pos_lerp[2]), &in_block);
+	uint8_t light = (in_block.torch_light << 4) | in_block.sky_light;
+
+	mat4 model;
+	glm_translate_make(model,
+					   (vec3) {pos_lerp[0], pos_lerp[1] + PLAYER_MODEL_ORIGIN_Y,
+							   pos_lerp[2]});
+	glm_rotate_y(model, e->orient[0], model);
+	glm_scale_uni(model, PLAYER_MODEL_SCALE);
+
+	mat4 mv;
+	glm_mat4_mul(view, model, mv);
+
+	// limbs swing with the walk cycle; arms counter-swing against the legs
+	float swing = sinf(e->data.local_player.walk_phase)
+		* e->data.local_player.walk_amp;
+	// orient[1] is the camera polar angle (0 = up, pi/2 = level, pi = down);
+	// the model's head pitch is degrees down from level.
+	float head_pitch = glm_deg(e->orient[1] - GLM_PIf / 2.0F);
+
+	// this entity's own inventory container (issue #139): P2's model holds
+	// P2's item
+	struct inventory* inv = windowc_get_latest(
+		mp_player_windowc(e->data.local_player.device));
+
+	struct item_data held, helmet, chestplate, leggings, boots;
+	bool has_held = inv && inventory_get_hotbar_item(inv, &held);
+	bool has_helmet
+		= inv && inventory_get_slot(inv, INVENTORY_SLOT_ARMOR + 0, &helmet);
+	bool has_chest
+		= inv && inventory_get_slot(inv, INVENTORY_SLOT_ARMOR + 1, &chestplate);
+	bool has_legs
+		= inv && inventory_get_slot(inv, INVENTORY_SLOT_ARMOR + 2, &leggings);
+	bool has_boots
+		= inv && inventory_get_slot(inv, INVENTORY_SLOT_ARMOR + 3, &boots);
+
+	float brightness = gfx_lookup_light(light);
+	if(brightness < 0.08F)
+		brightness = 0.08F;
+
+	gfx_lighting(false);
+	render_item_update_light(light);
+	render_model_player(mv, head_pitch, 0.0F, swing, -swing * 0.9F,
+						has_held ? &held : NULL, has_helmet ? &helmet : NULL,
+						has_chest ? &chestplate : NULL,
+						has_legs ? &leggings : NULL, has_boots ? &boots : NULL,
+						brightness);
+	gfx_lighting(true);
+
+	// standard entity blob shadow at the feet
+	struct AABB bbox;
+	aabb_setsize_centered(&bbox, 0.6F, 0.1F, 0.6F);
+	aabb_translate(&bbox, pos_lerp[0], pos_lerp[1] - EYE_HEIGHT + 0.05F,
+				   pos_lerp[2]);
+	entity_shadow(e, &bbox, view);
+}
+#endif
+
 void entity_local_player(uint32_t id, struct entity* e, struct world* w) {
 	assert(e && w);
 
 	e->id = id;
 	e->tick_server = NULL;
 	e->tick_client = entity_tick;
+#ifndef CAVEX_TEST_BUILD
+	// Visible to the OTHER split-screen player; the active viewport's own
+	// entity is skipped inside the render (first person). See issue #138.
+	e->render = entity_player_render;
+#else
 	e->render = NULL;
+#endif
 	e->teleport = entity_default_teleport;
 	e->type = ENTITY_LOCAL_PLAYER;
 	e->data.local_player.capture_input = false;
@@ -415,4 +594,7 @@ void entity_local_player(uint32_t id, struct entity* e, struct world* w) {
 	e->data.local_player.creative = false; // updated by CRPC_GAMEMODE on load
 	e->data.local_player.jump_tap_window = 0;
 	e->data.local_player.jump_held_prev = false;
+	e->data.local_player.walk_phase = 0.0F;
+	e->data.local_player.walk_amp = 0.0F;
+	e->data.local_player.has_last_safe = false;
 }

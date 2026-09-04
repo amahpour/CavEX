@@ -162,14 +162,15 @@ static void onRightClick(struct server_local* s, struct item_data* it,
 	// Mirror the SRPC_BLOCK_PLACE consume: one dye spent in survival, none in
 	// creative, and tell the client its hotbar slot changed.
 	if(!s->player.creative) {
-		size_t slot = inventory_get_hotbar(&s->player.inventory);
-		inventory_consume(&s->player.inventory, slot + INVENTORY_SLOT_HOTBAR);
+		size_t slot = inventory_get_hotbar(&s->acting->inventory);
+		inventory_consume(&s->acting->inventory, slot + INVENTORY_SLOT_HOTBAR);
 		clin_rpc_send(&(struct client_rpc) {
 			.type = CRPC_INVENTORY_SLOT,
-			.payload.inventory_slot.window = WINDOWC_INVENTORY,
+			.payload.inventory_slot.window
+			= server_player_inv_window(s->acting),
 			.payload.inventory_slot.slot = slot + INVENTORY_SLOT_HOTBAR,
 			.payload.inventory_slot.item
-			= s->player.inventory.items[slot + INVENTORY_SLOT_HOTBAR],
+			= s->acting->inventory.items[slot + INVENTORY_SLOT_HOTBAR],
 		});
 	}
 }

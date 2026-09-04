@@ -18,6 +18,7 @@
 */
 
 #include <assert.h>
+#include <string.h>
 
 #include "level_archive.h"
 
@@ -32,6 +33,104 @@ bool level_archive_create(struct level_archive* la, string_t filename) {
 	la->data = nbt_parse_path(string_get_cstr(la->file_name));
 
 	return la->data;
+}
+
+// Build the minimal level.dat-shaped tree the inventory helpers need:
+// "" { Data { Player { Inventory: [compound] } } }. Heap-built node by node
+// (no nbt_clone: its deep-copy semantics for an empty hand-rolled list
+// sentinel are not something to depend on).
+static nbt_node* player_file_new_tree(void) {
+	nbt_node* inv = malloc(sizeof(nbt_node));
+	struct nbt_list* inv_sentinel = malloc(sizeof(struct nbt_list));
+	nbt_node* inv_type = malloc(sizeof(nbt_node));
+	nbt_node* player = malloc(sizeof(nbt_node));
+	struct nbt_list* player_list = malloc(sizeof(struct nbt_list));
+	struct nbt_list* player_entry = malloc(sizeof(struct nbt_list));
+	nbt_node* data = malloc(sizeof(nbt_node));
+	struct nbt_list* data_list = malloc(sizeof(struct nbt_list));
+	struct nbt_list* data_entry = malloc(sizeof(struct nbt_list));
+	nbt_node* root = malloc(sizeof(nbt_node));
+	struct nbt_list* root_list = malloc(sizeof(struct nbt_list));
+	struct nbt_list* root_entry = malloc(sizeof(struct nbt_list));
+
+	if(!inv || !inv_sentinel || !inv_type || !player || !player_list
+	   || !player_entry || !data || !data_list || !data_entry || !root
+	   || !root_list || !root_entry) {
+		free(inv);
+		free(inv_sentinel);
+		free(inv_type);
+		free(player);
+		free(player_list);
+		free(player_entry);
+		free(data);
+		free(data_list);
+		free(data_entry);
+		free(root);
+		free(root_list);
+		free(root_entry);
+		return NULL;
+	}
+
+	// Inventory: empty TAG_LIST of compounds (sentinel data carries the type)
+	inv_type->type = TAG_COMPOUND;
+	inv_type->name = NULL;
+	inv_type->payload.tag_compound = NULL;
+	inv_sentinel->data = inv_type;
+	INIT_LIST_HEAD(&inv_sentinel->entry);
+	inv->type = TAG_LIST;
+	inv->name = strdup("Inventory");
+	inv->payload.tag_list = inv_sentinel;
+
+	// Player { Inventory }
+	player_list->data = NULL;
+	INIT_LIST_HEAD(&player_list->entry);
+	player_entry->data = inv;
+	list_add_tail(&player_entry->entry, &player_list->entry);
+	player->type = TAG_COMPOUND;
+	player->name = strdup("Player");
+	player->payload.tag_compound = player_list;
+
+	// Data { Player }
+	data_list->data = NULL;
+	INIT_LIST_HEAD(&data_list->entry);
+	data_entry->data = player;
+	list_add_tail(&data_entry->entry, &data_list->entry);
+	data->type = TAG_COMPOUND;
+	data->name = strdup("Data");
+	data->payload.tag_compound = data_list;
+
+	// "" { Data }
+	root_list->data = NULL;
+	INIT_LIST_HEAD(&root_list->entry);
+	root_entry->data = data;
+	list_add_tail(&root_entry->entry, &root_list->entry);
+	root->type = TAG_COMPOUND;
+	root->name = strdup("");
+	root->payload.tag_compound = root_list;
+
+	return root;
+}
+
+bool level_archive_create_player_file(struct level_archive* la,
+									  string_t world_dir, const char* file) {
+	assert(la && world_dir && file);
+
+	la->modified = false;
+
+	string_init_printf(la->file_name, "%s/%s", string_get_cstr(world_dir),
+					   file);
+
+	la->data = nbt_parse_path(string_get_cstr(la->file_name));
+
+	if(!la->data)
+		la->data = player_file_new_tree();
+
+	if(!la->data) {
+		string_clear(la->file_name);
+		return false;
+	}
+
+	return true;
 }
 
 static bool level_archive_read_internal(nbt_node* root,

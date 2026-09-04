@@ -4,40 +4,185 @@
 		"worlds": "saves"
 	},
 	"input": {
-		"player_forward": [87],
-		"player_backward": [83],
-		"player_left": [65],
-		"player_right": [68],
-		"player_jump": [32],
-		"player_sneak": [340],
-		"item_action_left": [1000],
-		"item_action_right": [1001],
-		"scroll_left": [2000],
-		"scroll_right": [2001],
-		"inventory": [69],
-		"open_menu": [257],
-		"gui_up": [87],
-		"gui_down": [83],
-		"gui_left": [65],
-		"gui_right": [68],
-		"gui_click": [1000],
-		"gui_click_alt": [1001],
-		"screenshot": [291],
-		"map": [77],
-		"toggle_creative": [67],
-		"creative_page": [82],
-
-		"player2_forward": [73],
-		"player2_backward": [75],
-		"player2_left": [74],
-		"player2_right": [76],
-		"player2_jump": [344],
-		"player2_sneak": [345],
-		"player2_action_left": [44],
-		"player2_action_right": [46],
-		"player2_look_up": [265],
-		"player2_look_down": [264],
-		"player2_look_left": [263],
-		"player2_look_right": [262]
+		"player_forward": [
+			87,
+			3000
+		],
+		"player_backward": [
+			83,
+			3002
+		],
+		"player_left": [
+			65,
+			3003
+		],
+		"player_right": [
+			68,
+			3001
+		],
+		"player_jump": [
+			32,
+			3008
+		],
+		"player_sneak": [
+			340
+		],
+		"item_action_left": [
+			1000,
+			3004
+		],
+		"item_action_right": [
+			1001,
+			3005
+		],
+		"scroll_left": [
+			2000
+		],
+		"scroll_right": [
+			2001
+		],
+		"inventory": [
+			69,
+			3009
+		],
+		"open_menu": [
+			257
+		],
+		"player_look_up": [
+			3102
+		],
+		"player_look_down": [
+			3103
+		],
+		"player_look_left": [
+			3100
+		],
+		"player_look_right": [
+			3101
+		],
+		"gui_up": [
+			87,
+			3102
+		],
+		"gui_down": [
+			83,
+			3103
+		],
+		"gui_left": [
+			65,
+			3100
+		],
+		"gui_right": [
+			68,
+			3101
+		],
+		"gui_click": [
+			1000,
+			3004
+		],
+		"gui_click_alt": [
+			1001,
+			3005
+		],
+		"screenshot": [
+			291
+		],
+		"map": [
+			77
+		],
+		"toggle_creative": [
+			67
+		],
+		"creative_page": [
+			82
+		],
+		"help": [
+			290,
+			3006
+		],
+		"player2_forward": [
+			73,
+			3000
+		],
+		"player2_backward": [
+			75,
+			3002
+		],
+		"player2_left": [
+			74,
+			3003
+		],
+		"player2_right": [
+			76,
+			3001
+		],
+		"player2_jump": [
+			344,
+			3008
+		],
+		"player2_sneak": [
+			345
+		],
+		"player2_action_left": [
+			44,
+			3004
+		],
+		"player2_action_right": [
+			46,
+			3005
+		],
+		"player2_look_up": [
+			265,
+			3102
+		],
+		"player2_look_down": [
+			264,
+			3103
+		],
+		"player2_look_left": [
+			263,
+			3100
+		],
+		"player2_look_right": [
+			262,
+			3101
+		],
+		"player2_scroll_left": [
+			85
+		],
+		"player2_scroll_right": [
+			79
+		],
+		"player2_inventory": [
+			80,
+			3009
+		],
+		"player2_gui_up": [
+			73,
+			3102
+		],
+		"player2_gui_down": [
+			75,
+			3103
+		],
+		"player2_gui_left": [
+			74,
+			3100
+		],
+		"player2_gui_right": [
+			76,
+			3101
+		],
+		"player2_gui_click": [
+			44,
+			3004
+		],
+		"player2_gui_click_alt": [
+			46,
+			3005
+		],
+		"player2_help": [
+			3006
+		]
 	}
 }
