@@ -31,7 +31,25 @@
 #include "server_world.h"
 
 #define MAX_REGIONS 4
-#define MAX_VIEW_DISTANCE 2 // in chunks (3->2: resident meshes 6.4MB->2.9MB, mesh-OOM 1255->0 on the dig roam; costs 48->32 block view). 5->3 earlier freed ~8MB.
+// How many chunks the server keeps loaded around the player, per platform.
+// This is a MEMORY budget, not a game rule, so it belongs to the target:
+//
+//   Wii  - 24 MB MEM1. Measured with the Dolphin rig: resident chunk meshes are
+//          the hog (6.4 MB / 192 chunks at 3). Dropping to 2 halves that
+//          (2.9 MB / 96 chunks) and takes mesh-OOM from 1255 to ZERO on the dig
+//          roam, so dug faces always render. Costs a 32-block view.
+//   PC   - gigabytes; no reason to be frugal. 8 gives a 128-block view.
+//
+// Override at build time with -DMAX_VIEW_DISTANCE=n (make VIEW_DISTANCE=n on
+// Wii, cmake -DCAVEX_VIEW_DISTANCE=n on PC). fog and the camera far plane are
+// DERIVED from this in main.c -- never hardcode them again, they drifted before.
+#ifndef MAX_VIEW_DISTANCE
+	#ifdef PLATFORM_WII
+		#define MAX_VIEW_DISTANCE 2
+	#else
+		#define MAX_VIEW_DISTANCE 8
+	#endif
+#endif
 #define MAX_CHUNKS ((MAX_VIEW_DISTANCE * 2 + 2) * (MAX_VIEW_DISTANCE * 2 + 2))
 
 // Villager spawn bookkeeping (issue #130). VILLAGER_MAX is a hard cap on live

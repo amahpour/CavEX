@@ -186,7 +186,13 @@ add_executable(cavex
 			)
 
 target_include_directories(cavex PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# View distance (chunks) for the native build; the Wii target sets its own much
+# lower budget in server_local.h. cmake -DCAVEX_VIEW_DISTANCE=n to override.
+set(CAVEX_VIEW_DISTANCE "" CACHE STRING "Chunk view distance (blank = platform default)")
 target_compile_definitions(cavex PRIVATE PLATFORM_PC CGLM_ALL_UNALIGNED)
+if(CAVEX_VIEW_DISTANCE)
+	target_compile_definitions(cavex PRIVATE MAX_VIEW_DISTANCE=${CAVEX_VIEW_DISTANCE})
+endif()
 
 set_target_properties(
 	cavex PROPERTIES

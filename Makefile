@@ -65,7 +65,15 @@ INCLUDES	:=	include
 # options for code generation
 #---------------------------------------------------------------------------------
 
-CFLAGS		=	-g -std=c99 -pedantic -Wextra -Wno-unused-parameter -flto=auto -O3 -Wall -DNDEBUG -DPLATFORM_WII $(MACHDEP) $(INCLUDE) -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600
+# Optional view-distance override for the Wii build: make VIEW_DISTANCE=3
+# (default lives in source/network/server_local.h -- 2 on Wii for MEM1).
+ifneq ($(strip $(VIEW_DISTANCE)),)
+VIEWDEF	:=	-DMAX_VIEW_DISTANCE=$(VIEW_DISTANCE)
+else
+VIEWDEF	:=
+endif
+
+CFLAGS		=	$(VIEWDEF) -g -std=c99 -pedantic -Wextra -Wno-unused-parameter -flto=auto -O3 -Wall -DNDEBUG -DPLATFORM_WII $(MACHDEP) $(INCLUDE) -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600
 CXXFLAGS	=	$(CFLAGS)
 
 LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map

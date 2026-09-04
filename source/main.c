@@ -115,8 +115,12 @@ int main(void) {
 	gstate.camera = (struct camera) {
 		.x = 0, .y = 0, .z = 0, .rx = 0, .ry = 0, .controller = {0, 0, 0}};
 	gstate.config.fov = 70.0F;
-	gstate.config.render_distance = 96.0F;
-	gstate.config.fog_distance = 2 * 16.0F;
+	// Both DERIVED from MAX_VIEW_DISTANCE (server_local.h) so they can never
+	// drift from the loaded-chunk radius again. The far plane must clear the
+	// far corner of the furthest loaded chunk (~(vd+1)*16*sqrt2), so (vd+2)*24
+	// leaves margin -- and reproduces the historical 96.0 exactly at vd=2.
+	gstate.config.render_distance = (MAX_VIEW_DISTANCE + 2) * 24.0F;
+	gstate.config.fog_distance = MAX_VIEW_DISTANCE * 16.0F;
 	gstate.world_loaded = false;
 	gstate.held_item_animation.punch.start = time_get();
 	gstate.held_item_animation.switch_item.start = time_get();

@@ -775,7 +775,11 @@ static void server_local_spawn_villagers(struct server_local* s) {
 
 	w_coord_t px = WCOORD_CHUNK_OFFSET((w_coord_t)floorf(s->player.x));
 	w_coord_t pz = WCOORD_CHUNK_OFFSET((w_coord_t)floorf(s->player.z));
-	w_coord_t r = MAX_VIEW_DISTANCE - 2; // == 1
+	// Fixed 3x3-chunk window around the player. This deliberately does NOT
+	// track MAX_VIEW_DISTANCE: at the Wii's 2 that expression went to 0 (only
+	// the player's own chunk scanned, so villages were missed) and at the PC's
+	// 8 it would sweep 169 chunks every pass.
+	w_coord_t r = 1;
 
 	for(w_coord_t cz = pz - r; cz <= pz + r; cz++)
 	for(w_coord_t cx = px - r; cx <= px + r; cx++) {
