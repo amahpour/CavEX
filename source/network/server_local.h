@@ -31,7 +31,7 @@
 #include "server_world.h"
 
 #define MAX_REGIONS 4
-#define MAX_VIEW_DISTANCE 3 // in chunks (was 5; freed ~8MB MEM1 so displaylist allocs stop failing)
+#define MAX_VIEW_DISTANCE 2 // in chunks (3->2: resident meshes 6.4MB->2.9MB, mesh-OOM 1255->0 on the dig roam; costs 48->32 block view). 5->3 earlier freed ~8MB.
 #define MAX_CHUNKS ((MAX_VIEW_DISTANCE * 2 + 2) * (MAX_VIEW_DISTANCE * 2 + 2))
 
 // Villager spawn bookkeeping (issue #130). VILLAGER_MAX is a hard cap on live

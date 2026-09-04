@@ -116,7 +116,7 @@ int main(void) {
 		.x = 0, .y = 0, .z = 0, .rx = 0, .ry = 0, .controller = {0, 0, 0}};
 	gstate.config.fov = 70.0F;
 	gstate.config.render_distance = 96.0F;
-	gstate.config.fog_distance = 3 * 16.0F;
+	gstate.config.fog_distance = 2 * 16.0F;
 	gstate.world_loaded = false;
 	gstate.held_item_animation.punch.start = time_get();
 	gstate.held_item_animation.switch_item.start = time_get();
