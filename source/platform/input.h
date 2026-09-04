@@ -112,7 +112,8 @@ void input_pointer_enable(bool enable);
 void input_pointer_reassert(void);
 bool input_pointer(float* x, float* y, float* angle);
 
-#ifdef PLATFORM_PC
+// Virtual-input (demo-replay) hook. Available on both platforms: the PC agent
+// rig and the Wii/Dolphin SD-script rig both install a source through it.
 // fed by the GLFW scroll callback; mouse wheel drives hotbar switching
 void input_native_scroll(double yoffset);
 
@@ -150,6 +151,5 @@ struct input_virtual_source* input_get_virtual_source_dev(int device);
 // True when ANY installed source has finished -- the dual demo stops as soon as
 // either player's script is exhausted.
 bool input_virtual_any_at_end(void);
-#endif
 
 #endif

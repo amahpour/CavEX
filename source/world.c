@@ -156,6 +156,7 @@ void world_create(struct world* w) {
 	ilist_chunks2_init(w->gpu_busy_chunks);
 	stack_create(&w->lighting_updates, 16,
 				 sizeof(struct world_modification_entry));
+	lighting_queue_create(&w->lighting_queue);
 	w->world_chunk_cache = NULL;
 	w->anim_timer = time_get();
 }
@@ -165,6 +166,7 @@ void world_destroy(struct world* w) {
 
 	world_unload_all(w);
 	stack_destroy(&w->lighting_updates);
+	lighting_queue_destroy(&w->lighting_queue);
 	dict_wsection_clear(w->sections);
 }
 
@@ -314,7 +316,7 @@ void world_update_lighting(struct world* w) {
 
 	world_set_block(w, source.x, source.y, source.z, source.blk, false);
 	lighting_update_at_block(source, false, world_light_get_block,
-							 world_light_set_light, w);
+							 world_light_set_light, w, &w->lighting_queue);
 }
 
 struct chunk* world_find_chunk_neighbour(struct world* w, struct chunk* c,

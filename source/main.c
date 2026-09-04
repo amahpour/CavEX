@@ -44,10 +44,13 @@
 #include "platform/input.h"
 #include "world.h"
 
+#include "platform/demo_input.h"
 #ifdef PLATFORM_PC
 #include "game/state_export.h"
-#include "platform/demo_input.h"
 #endif
+
+// Wii test-rig scripted input, read from the SD card (see scripts/dolphin_demo.sh).
+#define CAVEX_WII_DEMO_PATH "demo.txt"
 
 #include "cNBT/nbt.h"
 #include "cglm/cglm.h"
@@ -112,8 +115,12 @@ int main(void) {
 	gstate.camera = (struct camera) {
 		.x = 0, .y = 0, .z = 0, .rx = 0, .ry = 0, .controller = {0, 0, 0}};
 	gstate.config.fov = 70.0F;
-	gstate.config.render_distance = 96.0F;
-	gstate.config.fog_distance = 3 * 16.0F;
+	// Both DERIVED from MAX_VIEW_DISTANCE (server_local.h) so they can never
+	// drift from the loaded-chunk radius again. The far plane must clear the
+	// far corner of the furthest loaded chunk (~(vd+1)*16*sqrt2), so (vd+2)*24
+	// leaves margin -- and reproduces the historical 96.0 exactly at vd=2.
+	gstate.config.render_distance = (MAX_VIEW_DISTANCE + 2) * 24.0F;
+	gstate.config.fog_distance = MAX_VIEW_DISTANCE * 16.0F;
 	gstate.world_loaded = false;
 	gstate.held_item_animation.punch.start = time_get();
 	gstate.held_item_animation.switch_item.start = time_get();
@@ -171,6 +178,18 @@ int main(void) {
 			if(src2)
 				input_set_virtual_source_dev(1, src2);
 		}
+	}
+#endif
+
+#ifdef PLATFORM_WII
+	// Wii/Dolphin test rig: env vars do not cross into the emulated Wii, so the
+	// scripted-input source is loaded from a fixed SD path instead (Dolphin
+	// mounts the SD card; cwd is already sd:/). Absent file -> normal gameplay.
+	{
+		struct input_virtual_source* src
+			= demo_input_create_from_path(CAVEX_WII_DEMO_PATH);
+		if(src)
+			input_set_virtual_source(src);
 	}
 #endif
 
@@ -322,8 +341,7 @@ int main(void) {
 
 		float tick_delta = time_diff_s(last_tick, time_get()) / 0.05F;
 
-#ifdef PLATFORM_PC
-		static int demo_tick = 0;	  // monotonic 20 Hz demo clock (PC rig)
+		static int demo_tick = 0;	  // monotonic 20 Hz demo clock
 		int demo_ticks_this_frame = 0; // ticks the demo stepped this frame
 
 		// The demo only drives input once the local player is actually accepting
@@ -335,7 +353,6 @@ int main(void) {
 		// point identical across runs.
 		bool demo_ready = input_get_virtual_source() && gstate.local_player
 			&& gstate.local_player->data.local_player.capture_input;
-#endif
 
 		// The demo is stepped INSIDE the normal 20 Hz accumulator so simulation
 		// runs at the real tick rate (one tick per frame would couple sim speed
@@ -344,34 +361,31 @@ int main(void) {
 		while(tick_delta >= 1.0F) {
 			last_tick = time_add_ms(last_tick, 50);
 			tick_delta -= 1.0F;
-#ifdef PLATFORM_PC
 			bool demo_done = false;
 			if(demo_ready) {
+#ifdef PLATFORM_PC
 				// Live agent (#67): publish the state for this tick BEFORE the
 				// source reads its action, so the driver decides on the world it
 				// is about to act in. In gated mode the step below then blocks
 				// until the driver's action line arrives (pause-think-act).
 				if(agent_input_active())
 					state_export_emit(demo_tick);
+#endif
 				input_virtual_step_tick(demo_tick++);
 				demo_ticks_this_frame++;
 				// Stop at exactly the last scripted tick so the total tick count
 				// (and thus the captured frame count) is independent of how many
-				// ticks happen to elapse in the final frame -- this is what keeps
-				// "same script twice -> same frame count" true.
+				// ticks happen to elapse in the final frame.
 				demo_done = input_virtual_at_end();
 			}
-#endif
 			particle_update();
 			entities_client_tick(gstate.entities);
-#ifdef PLATFORM_PC
-			// End after fully simulating this tick; the run holds the final state
-			// for one rendered frame, then the rig stitches the dumped frames.
+			// End after fully simulating this tick; the run holds the final
+			// state for one rendered frame, then the rig stitches the frames.
 			if(demo_done) {
 				gstate.quit = true;
 				break;
 			}
-#endif
 		}
 
 		if(gstate.local_player)

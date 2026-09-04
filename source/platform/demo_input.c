@@ -250,7 +250,6 @@ bool agent_parse_action(const char* line, struct agent_action* out) {
 	return true;
 }
 
-#ifdef PLATFORM_PC
 
 // File-replay implementation of the virtual-input source. Per tick it resolves
 // the script state and latches the look delta so it is applied exactly once per
@@ -369,6 +368,20 @@ struct input_virtual_source* demo_input_create_from_env(void) {
 	return demo_load(getenv("CAVEX_DEMO"), &demo_file_source_storage);
 }
 
+struct input_virtual_source* demo_input_create_from_path(const char* path) {
+	return demo_load(path, &demo_file_source_storage);
+}
+
+bool demo_file_exists(const char* path) {
+	if(!path)
+		return false;
+	FILE* f = fopen(path, "rb");
+	if(!f)
+		return false;
+	fclose(f);
+	return true;
+}
+
 struct input_virtual_source* demo_input_create_from_env_dev(int device) {
 	if(device <= 0)
 		return demo_load(getenv("CAVEX_DEMO"), &demo_file_source_storage);
@@ -393,6 +406,12 @@ struct input_virtual_source* demo_input_create_from_env_dev(int device) {
 // This glue is part of the engine input path (it touches input_virtual_source),
 // which the pure unit-test harness does not link, so it is excluded from the
 // test build (CAVEX_TEST_BUILD). The pure action parser above IS tested.
+//
+// The live stdin agent source below is PC-only: it needs select()/unistd and a
+// real stdin, neither of which the Wii/Dolphin target has. The file-replay
+// source above is cross-platform (it just reads a file), which is what the
+// Wii SD-script rig uses.
+#ifdef PLATFORM_PC
 #ifndef CAVEX_TEST_BUILD
 
 #include <sys/select.h>

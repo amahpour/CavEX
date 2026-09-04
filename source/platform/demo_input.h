@@ -115,12 +115,22 @@ struct agent_action {
 // token. Exposed for testing.
 bool agent_parse_action(const char* line, struct agent_action* out);
 
-#ifdef PLATFORM_PC
 // Build a file-replay virtual source from CAVEX_DEMO (a script path). Returns a
 // pointer suitable for input_set_virtual_source(), or NULL if the env var is
 // unset or the file cannot be read/parsed (in which case gameplay is unchanged).
 // The returned source is owned by the module (static storage); do not free it.
 struct input_virtual_source* demo_input_create_from_env(void);
+
+// Load a file-replay source directly from a path (no getenv). This is how the
+// Wii/Dolphin test rig installs a scripted run: env vars do not cross into the
+// emulated Wii, but the SD card does, so main.c reads "sd:/demo.txt". NULL path
+// or a missing file returns NULL (gameplay unchanged).
+struct input_virtual_source* demo_input_create_from_path(const char* path);
+
+// True if `path` names a readable file. The Wii rig uses it to gate autoplay
+// and the demo source on the presence of the SD script, the way CAVEX_* env
+// vars gate the PC rig.
+bool demo_file_exists(const char* path);
 
 // Build a file-replay source for a specific local device (split-screen). device 0
 // uses CAVEX_DEMO (== demo_input_create_from_env), device 1 uses CAVEX_DEMO2.
@@ -133,11 +143,12 @@ struct input_virtual_source* demo_input_create_from_env_dev(int device);
 // arrives (pause-think-act for a slow driver); otherwise a tick with no pending
 // line is neutral (real-time). The returned source is owned by the module
 // (static storage); do not free it.
+#ifdef PLATFORM_PC
 struct input_virtual_source* agent_input_create_from_env(void);
+#endif
 
 // True when the agent live source is active (CAVEX_AGENT=1 was honoured). Lets
 // the main loop know it should emit a state line each tick. PC dev rig only.
 bool agent_input_active(void);
-#endif
 
 #endif

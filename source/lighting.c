@@ -69,18 +69,33 @@ static inline int8_t MAX_I8(int8_t a, int8_t b) {
 	return a > b ? a : b;
 }
 
+// 4096 entries x 12 bytes = 48 KB, held for the life of the world. A sky-light
+// cascade through a removed ceiling is the usual worst case and fits; anything
+// bigger still grows the queue (now OOM-safe) and keeps the larger size.
+#define LIGHTING_QUEUE_INITIAL 4096
+
+void lighting_queue_create(struct stack* queue) {
+	assert(queue);
+	stack_create(queue, LIGHTING_QUEUE_INITIAL,
+				 sizeof(struct lighting_update_entry));
+}
+
+void lighting_queue_destroy(struct stack* queue) {
+	assert(queue);
+	stack_destroy(queue);
+}
+
 void lighting_update_at_block(
 	struct world_modification_entry source, bool ignore_sky_light,
 	bool (*get_block)(void* user, w_coord_t x, w_coord_t y, w_coord_t z,
 					  struct block_data* blk, uint8_t* height),
 	void (*set_light)(void* user, w_coord_t x, w_coord_t y, w_coord_t z,
 					  uint8_t light),
-	void* user) {
-	assert(get_block && set_light);
+	void* user, struct stack* queue) {
+	assert(get_block && set_light && queue);
 
-	struct stack queue;
-	stack_create(&queue, 128, sizeof(struct lighting_update_entry));
-	stack_push(&queue,
+	stack_clear(queue);
+	stack_push(queue,
 			   &(struct lighting_update_entry) {
 				   .x = source.x,
 				   .y = source.y,
@@ -89,9 +104,9 @@ void lighting_update_at_block(
 
 	bool force_source = true;
 
-	while(!stack_empty(&queue)) {
+	while(!stack_empty(queue)) {
 		struct lighting_update_entry current;
-		stack_pop(&queue, &current);
+		stack_pop(queue, &current);
 
 		uint8_t column_height;
 		struct block_data old;
@@ -150,7 +165,7 @@ void lighting_update_at_block(
 
 				if(get_block(user, current.x + x, current.y + y, current.z + z,
 							 NULL, NULL))
-					stack_push(&queue,
+					stack_push(queue,
 							   &(struct lighting_update_entry) {
 								   .x = current.x + x,
 								   .y = current.y + y,
@@ -160,5 +175,4 @@ void lighting_update_at_block(
 		}
 	}
 
-	stack_destroy(&queue);
 }

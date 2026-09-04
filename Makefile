@@ -9,14 +9,37 @@
 .SECONDARY:
 #---------------------------------------------------------------------------------
 
-ifneq (,$(filter test pc play,$(MAKECMDGOALS)))
-.PHONY: test pc play
+ifneq (,$(filter help test pc play play-wii dolphin,$(MAKECMDGOALS)))
+.PHONY: help test pc play play-wii dolphin
+help:
+	@echo 'CavEX make targets'
+	@echo
+	@echo '  Wii / Dolphin'
+	@echo '    make            build CavEX.dol (needs DEVKITPPC in the environment)'
+	@echo '    make play-wii   build + stage the SD image + launch Dolphin'
+	@echo '    make dolphin    alias for play-wii'
+	@echo
+	@echo '  Native PC (fast iteration on game logic)'
+	@echo '    make pc         build the native binary into build_pc/'
+	@echo '    make play       build + run the native binary'
+	@echo
+	@echo '  Checks'
+	@echo '    make test       unit tests + per-test coverage gate'
+	@echo '    make clean      remove Wii build artifacts'
+	@echo
+	@echo 'Notes'
+	@echo '  * play-wii sets up devkitPPC itself; plain make does not.'
+	@echo '  * Close the GNOME Bluetooth panel before play-wii, or a real'
+	@echo '    Wii Remote will never connect (it starves Dolphin of the adapter).'
+	@echo '  * Press 1+2 on the remote once Dolphin is up.'
 test:
 	@bash scripts/run_tests.sh
 pc:
 	@bash scripts/build_pc.sh
 play:
 	@bash scripts/run_pc.sh
+play-wii dolphin:
+	@bash scripts/run_wii.sh
 else
 
 ifeq ($(strip $(DEVKITPPC)),)
@@ -42,10 +65,18 @@ INCLUDES	:=	include
 # options for code generation
 #---------------------------------------------------------------------------------
 
-CFLAGS		=	-std=c99 -pedantic -Wextra -Wno-unused-parameter -flto=auto -O3 -Wall -DNDEBUG -DPLATFORM_WII $(MACHDEP) $(INCLUDE) -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600
+# Optional view-distance override for the Wii build: make VIEW_DISTANCE=3
+# (default lives in source/network/server_local.h -- 2 on Wii for MEM1).
+ifneq ($(strip $(VIEW_DISTANCE)),)
+VIEWDEF	:=	-DMAX_VIEW_DISTANCE=$(VIEW_DISTANCE)
+else
+VIEWDEF	:=
+endif
+
+CFLAGS		=	$(VIEWDEF) -g -std=c99 -pedantic -Wextra -Wno-unused-parameter -flto=auto -O3 -Wall -DNDEBUG -DPLATFORM_WII $(MACHDEP) $(INCLUDE) -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600
 CXXFLAGS	=	$(CFLAGS)
 
-LDFLAGS	=	$(MACHDEP) -Wl,-Map,$(notdir $@).map
+LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project

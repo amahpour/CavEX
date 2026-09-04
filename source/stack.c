@@ -32,19 +32,39 @@ void stack_create(struct stack* stk, size_t inital_size, size_t element_size) {
 	stk->length = inital_size;
 	stk->data = malloc(stk->length * stk->element_size);
 	assert(stk->data);
+	// Out of memory (Wii MEM1): leave a valid, empty, zero-capacity stack.
+	// realloc(NULL, n) in stack_push is a plain malloc, so the first push
+	// simply retries the allocation instead of writing through NULL.
+	if(!stk->data)
+		stk->length = 0;
 }
 
-void stack_push(struct stack* stk, void* obj) {
+bool stack_push(struct stack* stk, void* obj) {
 	assert(stk != NULL && obj != NULL);
 
 	if(stk->index >= stk->length) {
-		stk->length *= 2;
-		stk->data = realloc(stk->data, stk->length * stk->element_size);
-		assert(stk->data);
+		size_t new_length = stk->length ? stk->length * 2 : 16;
+		void* new_data
+			= realloc(stk->data, new_length * stk->element_size);
+		assert(new_data);
+		if(!new_data) {
+			// Growth failed (24 MB MEM1 runs out under load). The old
+			// buffer is still valid -- realloc does not free it on failure
+			// -- so keep it and refuse the push. Before this the NULL was
+			// stored over the only pointer to that buffer (leaking it) with
+			// `length` already doubled, and every later push/pop on the
+			// lighting queue wrote and read through NULL: thousands of
+			// invalid accesses per minute, heap corruption, then a crash --
+			// with the assert above compiled out by -DNDEBUG.
+			return false;
+		}
+		stk->data = new_data;
+		stk->length = new_length;
 	}
 
 	memcpy((uint8_t*)stk->data + (stk->index++) * stk->element_size, obj,
 		   stk->element_size);
+	return true;
 }
 
 bool stack_empty(struct stack* stk) {
@@ -62,7 +82,7 @@ size_t stack_size(struct stack* stk) {
 void stack_at(struct stack* stk, void* obj, size_t index) {
 	assert(stk != NULL && obj != NULL);
 
-	if(index < stk->index)
+	if(stk->data && index < stk->index)
 		memcpy(obj, (uint8_t*)stk->data + index * stk->element_size,
 			   stk->element_size);
 }
@@ -70,7 +90,7 @@ void stack_at(struct stack* stk, void* obj, size_t index) {
 bool stack_pop(struct stack* stk, void* obj) {
 	assert(stk != NULL && obj != NULL);
 
-	if(stack_empty(stk))
+	if(stack_empty(stk) || !stk->data)
 		return false;
 
 	memcpy(obj, (uint8_t*)stk->data + (--stk->index) * stk->element_size,

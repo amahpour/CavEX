@@ -81,7 +81,9 @@ class GameSession:
         self.seed = seed
         self.autoshot = autoshot
         self.world = world
-        self.binary = binary or os.path.join(ROOT, "build_pc", "cavex")
+        # CAVEX_BIN lets the whole battery run against another build (e.g. the
+        # ASan binary in build_asan/) without touching build_pc/cavex.
+        self.binary = binary or os.environ.get("CAVEX_BIN") or os.path.join(ROOT, "build_pc", "cavex")
         self.quiet = quiet
         self.visible = visible    # show a real window (don't force the headless path)
         self.proc = None

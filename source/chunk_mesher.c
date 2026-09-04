@@ -45,9 +45,16 @@ struct chunk_mesher_rpc {
 	struct {
 		struct displaylist mesh[13];
 		bool has_displist[13];
+		// A side whose build ran out of MEM1 mid-way. The stale mesh is kept
+		// on screen and the chunk is re-queued, instead of the face vanishing
+		// for good (see chunk_mesher_receive).
+		bool oom[13];
 		uint8_t reachable[6];
 	} result;
 };
+
+// temporary diagnostics: mesh sides that hit OOM, for the on-screen overlay
+volatile int cm_dbg_oom = 0;
 
 static struct chunk_mesher_rpc rpc_msg[CHUNK_MESHER_QLENGTH];
 static struct thread_channel mesher_requests;
@@ -505,19 +512,52 @@ static void chunk_mesher_rebuild(struct block_data* bd, w_coord_t cx,
 }
 
 static void chunk_mesher_build(struct chunk_mesher_rpc* req) {
+	// Pass 1 -- count only. Fills vertices[] with the exact vertex count per
+	// display list and allocates nothing (count_only render never emits).
 	for(int k = 0; k < 13; k++) {
 		req->result.has_displist[k] = false;
-		displaylist_init(req->result.mesh + k, 64, false);
+		displaylist_init(req->result.mesh + k, 1, false);
 	}
 
 	size_t vertices[13];
 	chunk_mesher_rebuild(req->request.blocks, req->chunk->x, req->chunk->y,
+						 req->chunk->z, req->result.mesh, true, vertices);
+
+	// Pass 2 -- size each list to its EXACT vertex count, then fill it. One
+	// allocation at final size means displaylist_pos never realloc-grows. That
+	// growth (start 64 verts, x1.25 each time, then free) Swiss-cheesed the Wii
+	// heap: after enough of it there was no contiguous block left for the next
+	// mesh, so remeshes OOM'd with MEM1 nominally free -- "grass floats when you
+	// dig". Pre-sizing keeps the free space in usable pieces.
+	for(int k = 0; k < 13; k++)
+		displaylist_init(req->result.mesh + k,
+						 vertices[k] > 0 ? vertices[k] : 1, false);
+
+	chunk_mesher_rebuild(req->request.blocks, req->chunk->x, req->chunk->y,
 						 req->chunk->z, req->result.mesh, false, vertices);
 
 	for(int k = 0; k < 13; k++) {
+		req->result.oom[k] = false;
 		if(vertices[k] > 0 && vertices[k] <= 0xFFFF * 4) {
 			displaylist_finalize(req->result.mesh + k, vertices[k]);
-			req->result.has_displist[k] = true;
+			// Test the OOM flag, not `finished`: the PC backend only marks a
+			// list finished lazily on first render, so `finished` is false
+			// here on PC even for a perfectly good mesh.
+			if(!req->result.mesh[k].oom && req->result.mesh[k].data) {
+				req->result.has_displist[k] = true;
+			} else {
+				// The Wii finalize() refuses a list whose allocation failed
+				// on the way (24 MB MEM1 runs out under load). Before this the side
+				// was still flagged has_displist: render() skipped it as
+				// unfinished, so the faces vanished, and the chunk counted as
+				// meshed so it was never rebuilt -- every OOM permanently
+				// erased geometry until the world was a wireframe. Free the
+				// partial buffer and report it so the caller keeps the old
+				// mesh and retries.
+				displaylist_destroy(req->result.mesh + k);
+				req->result.oom[k] = true;
+				cm_dbg_oom++;
+			}
 		} else {
 			displaylist_destroy(req->result.mesh + k);
 		}
@@ -555,13 +595,26 @@ void chunk_mesher_receive() {
 	struct chunk_mesher_rpc* result;
 
 	while(tchannel_receive(&mesher_results, (void**)&result, false)) {
+		bool retry = false;
+
 		for(int k = 0; k < 13; k++) {
+			if(result->result.oom[k]) {
+				// Keep whatever this side had rather than swapping in nothing:
+				// a slightly stale face beats a hole. Re-queue the chunk so it
+				// rebuilds once memory frees up.
+				retry = true;
+				continue;
+			}
+
 			if(result->chunk->has_displist[k])
 				displaylist_destroy(result->chunk->mesh + k);
 
 			result->chunk->mesh[k] = result->result.mesh[k];
 			result->chunk->has_displist[k] = result->result.has_displist[k];
 		}
+
+		if(retry)
+			result->chunk->rebuild_displist = true;
 
 		for(int k = 0; k < 6; k++)
 			result->chunk->reachable[k] = result->result.reachable[k];
