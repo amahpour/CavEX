@@ -68,9 +68,32 @@ TEST(villager_entity_registration) {
 	ASSERT_NEAR(e.data.villager.yaw, 0.0F, 1e-6);
 }
 
+// Pure spawn-gate predicate (issue #130): villager_should_spawn(count, cap,
+// already) == (count < cap && !already). One test covers both branches in
+// separate assertions -- the population-cap boundary AND the per-cell dedupe --
+// so it contributes strictly-new covered lines to the per-test coverage gate.
+TEST(villager_spawn_gate) {
+	// Below the cap with a fresh cell: a villager may spawn.
+	ASSERT(villager_should_spawn(0, 16, false));
+
+	// The count boundary: at cap-1 it still spawns, at the cap it must not (this
+	// is what bounds the live population as a player roams many structures).
+	ASSERT(villager_should_spawn(15, 16, false));
+	ASSERT(!villager_should_spawn(16, 16, false));
+	// Over the cap (defensive) is likewise refused.
+	ASSERT(!villager_should_spawn(17, 16, false));
+
+	// The dedupe branch: an already-populated cell blocks a spawn even with
+	// plenty of population headroom, so a persistent marker is not re-spawned.
+	ASSERT(!villager_should_spawn(0, 16, true));
+	// Both conditions failing is still a refusal.
+	ASSERT(!villager_should_spawn(16, 16, true));
+}
+
 const test_entry_t g_tests_villager[] = {
 	{"villager_wander_math", test_villager_wander_math},
 	{"villager_entity_registration", test_villager_entity_registration},
+	{"villager_spawn_gate", test_villager_spawn_gate},
 };
 
 const size_t g_tests_villager_count
