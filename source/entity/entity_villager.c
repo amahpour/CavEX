@@ -48,6 +48,17 @@ void entity_villager_wander(float* yaw, vec3 vel, int turn, int forward,
 	// vel[1] intentionally untouched (gravity owns vertical)
 }
 
+// Pure spawn-gate decision -- see declaration in entity.h. No engine state, so
+// unit-testable. The spawner (server_local_spawn_villagers) consults this before
+// every spawn: it bounds the live villager count to `cap` (so villagers cannot
+// pile up without limit as a player roams the classic world's ~37 structures --
+// important for Wii MEM1) and refuses a marker cell already populated this
+// session (the dedupe branch).
+bool villager_should_spawn(int current_count, int cap,
+						   bool cell_already_populated) {
+	return current_count < cap && !cell_already_populated;
+}
+
 static bool entity_villager_client_tick(struct entity* e) {
 	entity_default_client_tick(e);
 	float dx = e->pos[0] - e->pos_old[0];
