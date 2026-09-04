@@ -17,6 +17,7 @@
 	along with CavEX.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "../../platform/demo_input.h"
 #include "../../graphics/gui_util.h"
 #include "../../network/level_archive.h"
 #include "../../network/server_interface.h"
@@ -154,16 +155,23 @@ static void screen_sworld_update(struct screen* s, float dt) {
 	// CAVEX_AUTOPLAY=1: enter the first world automatically (autonomous
 	// debugging without injected input)
 	static int autoplay_ticks = 0;
-	bool autoplay = getenv("CAVEX_AUTOPLAY") && ++autoplay_ticks > 100;
+	bool autoplay_req = getenv("CAVEX_AUTOPLAY") != NULL;
+#ifdef PLATFORM_WII
+	// Env vars do not cross into the emulated Wii; the test rig instead drops a
+	// scripted-input file on the SD card, and its presence also means "auto-
+	// enter the first world" (there is no one to click otherwise).
+	if(!autoplay_req)
+		autoplay_req = demo_file_exists("demo.txt");
+#endif
+	bool autoplay = autoplay_req && ++autoplay_ticks > 100;
 
 	if(stack_size(worlds) > 0 && (input_pressed(IB_GUI_CLICK) || autoplay)) {
 		struct world_option opt;
 		stack_at(worlds, &opt, gui_selection);
 
 #ifndef NDEBUG
-		if(getenv("CAVEX_AUTOPLAY"))
-			printf("[AUTOPLAY] loading world (worlds=%zu)\n",
-				   stack_size(worlds));
+		printf("[AUTOPLAY] loading world (worlds=%zu)\n",
+			   stack_size(worlds));
 #endif
 		struct server_rpc rpc;
 		rpc.type = SRPC_LOAD_WORLD;

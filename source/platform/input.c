@@ -737,7 +737,6 @@ void input_native_joystick(float dt, float* dx, float* dy) {
 
 #include "../game/game_state.h"
 
-#ifdef PLATFORM_PC
 // Virtual-input (demo-replay) sources, one per local device. NULL = normal
 // hardware input for that device, so when no demo is loaded every query below
 // falls through to the real input path and behaviour is identical to a build
@@ -839,7 +838,6 @@ bool input_virtual_any_at_end(void) {
 	}
 	return false;
 }
-#endif
 
 bool input_symbol(enum input_button b, int* symbol, int* symbol_help,
 				  enum input_category* category) {
@@ -917,7 +915,6 @@ bool input_gamepad_shoulders(int device) {
 #endif
 
 bool input_pressed_dev(enum input_button b, int device) {
-#ifdef PLATFORM_PC
 	if(device >= 0 && device < INPUT_MAX_DEVICES && input_virtual_src[device]) {
 		// Drain the latched rising edge (set by input_virtual_step_tick for any
 		// tick in this frame). Returning it once and clearing keeps a per-frame
@@ -927,7 +924,6 @@ bool input_pressed_dev(enum input_button b, int device) {
 		input_virtual_pending_press[device][b] = false;
 		return edge;
 	}
-#endif
 
 	const char* key = input_config_key(b, device);
 
@@ -964,14 +960,12 @@ bool input_pressed(enum input_button b) {
 }
 
 bool input_released_dev(enum input_button b, int device) {
-#ifdef PLATFORM_PC
 	if(device >= 0 && device < INPUT_MAX_DEVICES && input_virtual_src[device]) {
 		// Drain the latched falling edge (see input_pressed_dev()).
 		bool edge = input_virtual_pending_release[device][b];
 		input_virtual_pending_release[device][b] = false;
 		return edge;
 	}
-#endif
 
 	const char* key = input_config_key(b, device);
 
@@ -1008,10 +1002,8 @@ bool input_released(enum input_button b) {
 }
 
 bool input_held_dev(enum input_button b, int device) {
-#ifdef PLATFORM_PC
 	if(device >= 0 && device < INPUT_MAX_DEVICES && input_virtual_src[device])
 		return input_virtual_cur[device][b];
-#endif
 
 	const char* key = input_config_key(b, device);
 
@@ -1045,7 +1037,6 @@ bool input_held(enum input_button b) {
 }
 
 bool input_joystick_dev(float dt, float* x, float* y, int device) {
-#ifdef PLATFORM_PC
 	if(device >= 0 && device < INPUT_MAX_DEVICES && input_virtual_src[device]) {
 		// Apply the look delta accumulated across every tick stepped since the
 		// last camera poll, then clear it (drained once per frame).
@@ -1054,7 +1045,6 @@ bool input_joystick_dev(float dt, float* x, float* y, int device) {
 		input_virtual_look_dx[device] = input_virtual_look_dy[device] = 0.0F;
 		return true;
 	}
-#endif
 
 	if(device == 0) {
 		// Player 1 looks with the mouse (PC) or the joystick/IR (Wii).
